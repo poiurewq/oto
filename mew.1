@@ -1,0 +1,263 @@
+.\" mew.1 — manual page for mew
+.\" -----------------------------------------------------------------------
+.TH MEW 1 "March 2026" "mew 0.1.0" "User Commands"
+.\" -----------------------------------------------------------------------
+.SH NAME
+mew \- preprocess study notes and synthesize speech via KittenTTS
+.\" -----------------------------------------------------------------------
+.SH SYNOPSIS
+.B mew
+.RB [ \-h ]
+.I file
+.\" -----------------------------------------------------------------------
+.SH DESCRIPTION
+.B mew
+takes a note file, runs it through a text preprocessing pipeline
+optimised for natural-sounding speech output, then synthesizes the result
+to a WAV file using the KittenTTS engine directly via a self-contained
+Python venv.
+.PP
+Two output files are written alongside the input:
+.TP
+.I file\-processed.md
+The preprocessed plain text, kept for inspection and debugging.
+.TP
+.I file\-processed.wav
+The synthesized audio, ready for playback.
+.\" -----------------------------------------------------------------------
+.SH OPTIONS
+.TP
+.BR \-h ", " \-\-help
+Print a short usage summary and exit.
+.TP
+.B \-\-version
+Print the version number and exit.
+.\" -----------------------------------------------------------------------
+.SH CONFIGURATION
+Run
+.B mew config
+to interactively select the TTS model and voice.
+Preferences are saved to
+.I ~/.config/mew/prefs.json
+and used on every subsequent synthesis run.
+.PP
+.B Subcommands:
+.TP
+.B mew config
+Interactive prompt: offers to change model and/or voice.
+.TP
+.B mew config model
+Change model only.
+Available models:
+.BR mini " (best quality),"
+.BR micro " (balanced),"
+.BR nano " (fast, compact),"
+.BR nano-int8 " (fast, quantized)."
+If the chosen model has not been downloaded, you are prompted to download it.
+.TP
+.B mew config voice
+Change voice only.
+Available voices:
+.BR Bella ", " Jasper ", " Luna ", " Bruno ", " Rosie ", " Hugo ", " Kiki ", " Leo .
+.TP
+.B mew config delete
+Interactively select a downloaded model to remove from the cache.
+Only downloaded models are listed.
+If the selected model is the active model, a warning is shown before
+confirming deletion.
+.TP
+.B mew config show
+Print current model and voice settings without making changes.
+.\" -----------------------------------------------------------------------
+.SH PREPROCESSING PIPELINE
+The following transformations are applied to the input, in order:
+.TP
+.B Deduplication
+Repeated sections (identified by duplicate
+.B ##
+headings) are removed; only the first occurrence is kept.
+.TP
+.B Unicode normalisation
+Typographic characters are replaced with ASCII equivalents understood by
+KittenTTS: curly quotes become straight quotes, em\-dashes become
+.B \-\-
+(a dramatic pause marker), en\-dashes become
+.IR " to " ,
+and the Unicode ellipsis character becomes
+.BR ... .
+.TP
+.B Bracket removal
+Citation markers such as
+.B [1]
+or
+.B [1,2]
+are stripped entirely.
+Bracket\-enclosed text such as
+.B [word]
+has its brackets removed but the content kept.
+KittenTTS may stumble on bracket characters.
+.TP
+.B Parenthetical expansion
+Common parenthetical abbreviations are rewritten as inline clauses:
+.RS
+.PD 0
+.TP 16
+.BI (ex. " X" )
+\(-> , such as \fIX\fR,
+.TP
+.BI (i.e. " X" )
+\(-> , that is \fIX\fR,
+.TP
+.BI (e.g. " X" )
+\(-> , for example \fIX\fR,
+.PD
+.RE
+.TP
+.B Numeric range expansion
+Patterns such as
+.B 10\-20
+are expanded to
+.IR "ten to twenty" .
+Year ranges such as
+.B 1990\-2024
+become
+.IR "nineteen ninety to twenty twenty\-four" .
+Exact millennium years use the thousand form:
+.B 2000
+becomes
+.IR "two thousand" .
+.TP
+.B Slash handling
+.B and/or
+becomes
+.IR "and or" ;
+other
+.IB word / word
+patterns become
+.IR "word or word" .
+.TP
+.B Abbreviation expansion
+.RS
+.PD 0
+.TP 10
+.B e.g.
+\(-> for example
+.TP
+.B i.e.
+\(-> that is
+.TP
+.B ex.
+\(-> for example
+.TP
+.B etc.
+\(-> and so on
+.PD
+.RE
+.TP
+.B Markdown stripping
+Heading markers
+.RB ( # ", " ## ", " ### \~\[u2026])
+and emphasis markers
+.RB ( ** ", " * ", " __ ", " _ )
+are removed.
+KittenTTS may read
+.B #
+and
+.B *
+as literal characters.
+.TP
+.B Acronym expansion (first use)
+Known acronyms are expanded on their first appearance only.
+Currently:
+.B ACA
+\(->
+.IR "ACA, the American Counseling Association," .
+.TP
+.B Introductory\-clause commas
+Sentences beginning with a subordinating conjunction or preposition
+.RB ( When ", " During ", " Before ", " After ", " Because ", " Although ,
+.RI etc. )
+that are missing a comma before the main\-clause subject have one
+inserted automatically.
+.TP
+.B List numbering
+Bullet items
+.RB ( \- )
+following a recognised label line
+.RB ( "Potential Problems:" " or " "Recommendations and Resolutions:" )
+are replaced with spoken ordinals:
+.IR "Number one: \[u2026]" ", " "Number two: \[u2026]" ,
+and so on.
+Both labels reset the counter independently.
+.TP
+.B Section break pauses
+Each
+.B ##
+heading is preceded by an ellipsis line and surrounded by double blank
+lines, so KittenTTS produces a natural silence at each section transition.
+Label lines are followed by an extra blank line for additional breathing
+room before the numbered items.
+.TP
+.B Terminal period
+Any non\-empty line that still lacks terminal punctuation
+.RB ( . ", " ? ", " ! ", " : )
+has a period appended, ensuring the engine pauses at every logical break.
+.\" -----------------------------------------------------------------------
+.SH FILES
+.TP
+.I $(brew \-\-prefix)/bin/mew
+Symbolic link to the mew entry point inside the Homebrew-managed venv.
+.TP
+.I $(brew \-\-prefix)/opt/mew/libexec/venv/
+Python virtual environment containing mew, kittentts, and their
+dependencies.
+Managed by Homebrew; do not modify directly.
+.TP
+.I ~/.config/mew/prefs.json
+Persistent model and voice preferences.
+Created automatically when preferences are first saved via
+.BR "mew config" .
+.TP
+.I ~/.cache/mew/models/
+KittenTTS model cache; one subdirectory per model alias, populated
+automatically on first use or when downloading via
+.BR "mew config" .
+.\" -----------------------------------------------------------------------
+.SH EXAMPLES
+Synthesize a single note file:
+.PP
+.RS
+.B mew 001_Ethics\-Supervision\-Training\-and\-Teaching.md
+.RE
+.PP
+Inspect the preprocessed text before listening:
+.PP
+.RS
+.nf
+mew notes.md
+less notes\-processed.md
+.fi
+.RE
+.\" -----------------------------------------------------------------------
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Invalid arguments, missing input file, missing dependency, or synthesis
+error.
+.\" -----------------------------------------------------------------------
+.SH SEE ALSO
+.BR python3 (1)
+.\" -----------------------------------------------------------------------
+.SH BUGS
+Introductory\-clause comma insertion uses a heuristic position threshold
+and may occasionally miss or misplace a comma in unusual sentence
+constructions.
+.PP
+Acronym expansion is limited to a small built\-in list; acronyms in other
+subject domains are not expanded automatically.
+.\" -----------------------------------------------------------------------
+.SH AUTHOR
+Written for personal study\-note workflows.
