@@ -128,16 +128,16 @@ def synthesize(text: str, output_path: str) -> None:
     phonemes = _count_phonemes(text)
     est = _estimate_seconds(phonemes, model_alias)
 
-    if est is not None:
-        print(f"  Synthesizing (~{est:.0f}s estimated)...", file=sys.stderr)
-    else:
-        print("  Synthesizing (this may take a while)...", file=sys.stderr)
-
     import soundfile as sf
     from kittentts import KittenTTS
     import threading
 
     tts = KittenTTS(repo_id, cache_dir=cache_dir)
+
+    if est is not None:
+        print(f"  Synthesizing (~{est:.0f}s estimated)...", file=sys.stderr)
+    else:
+        print("  Synthesizing (this may take a while)...", file=sys.stderr)
 
     # Run generation in a thread so we can show progress on the main thread
     result: list = []

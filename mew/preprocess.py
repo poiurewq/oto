@@ -73,6 +73,57 @@ def _number_to_words(n: int) -> str:
     return _number_to_words(thousands) + ' thousand' + tail
 
 
+# DT. Date/time patterns — must be matched before range expansion.
+_MONTHS = [
+    '', 'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+_DAY_SUFFIXES = {1: 'st', 2: 'nd', 3: 'rd', 21: 'st', 22: 'nd', 23: 'rd', 31: 'st'}
+
+
+def _day_ordinal(d: int) -> str:
+    return f'{d}{_DAY_SUFFIXES.get(d, "th")}'
+
+
+def _time_to_words(h: int, m: int) -> str:
+    if h == 0 and m == 0:
+        return 'midnight'
+    if h == 12 and m == 0:
+        return 'noon'
+    period = 'AM' if h < 12 else 'PM'
+    display_h = h % 12 or 12
+    if m == 0:
+        return f'{display_h} {period}'
+    return f'{display_h}:{m:02d} {period}'
+
+
+# YYYY-MM-DD or YYYY.MM.DD, optional separator + HH:MM
+_RE_DATETIME = re.compile(
+    r'(?<!\w)'
+    r'(\d{4})[.\-](\d{1,2})[.\-](\d{1,2})'   # date: YYYY-MM-DD or YYYY.MM.DD
+    r'(?:'
+    r'[\s\-T](\d{1,2}):(\d{2})'               # optional time: HH:MM
+    r')?'
+    r'(?!\w)'
+)
+
+
+def _expand_datetimes(line: str) -> str:
+    """DT. Convert date/timestamp patterns to natural speech."""
+    def _repl(m):
+        y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if not (1 <= mo <= 12 and 1 <= d <= 31):
+            return m.group(0)  # not a valid date, leave as-is
+        parts = [f'{_MONTHS[mo]} {_day_ordinal(d)}, {y}']
+        if m.group(4) is not None:
+            h, mi = int(m.group(4)), int(m.group(5))
+            if 0 <= h <= 23 and 0 <= mi <= 59:
+                parts.append(f'at {_time_to_words(h, mi)}')
+        return ' '.join(parts)
+    return _RE_DATETIME.sub(_repl, line)
+
+
 # RG. Numeric range pattern: digits-digits not surrounded by other word chars.
 _RE_RANGE = re.compile(r'(?<!\w)(\d+)-(\d+)(?!\w)')
 
@@ -244,7 +295,7 @@ def _add_intro_commas(line: str) -> str:
 
 # ── Main processing loop ───────────────────────────────────────────────────────
 
-def process(input_path: str, output_path: str | None = None) -> str:
+def process(input_path: str, output_path: 'str | None' = None) -> str:
     """Preprocess *input_path* and write the result to *output_path*.
 
     If *output_path* is ``None``, defaults to ``<base>-processed<ext>``.
@@ -286,6 +337,7 @@ def process(input_path: str, output_path: str | None = None) -> str:
         line = _normalize_unicode(raw_line)
         line = _strip_brackets(line)
         line = _expand_parens(line)
+        line = _expand_datetimes(line)
         line = _expand_ranges(line)
         line = _handle_slashes(line)
         line = _expand_abbreviations(line)
