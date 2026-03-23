@@ -390,7 +390,13 @@ def _do_default(
         tmp_path = tmp.name
 
     try:
-        preprocess.process(str(input_path), tmp_path)
+        # Stage 0: Preprocessing — estimate scales with file size
+        file_bytes = input_path.stat().st_size
+        est_preprocess = max(0.2, file_bytes / 60_000)
+        speak._run_stage(
+            "Preprocessing", est_preprocess,
+            preprocess.process, str(input_path), tmp_path,
+        )
         out_wav = _deconflict(stem.with_suffix(".mew.wav"))
         speak.synthesize(
             Path(tmp_path).read_text(encoding="utf-8"),

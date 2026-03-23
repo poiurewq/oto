@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -64,9 +65,18 @@ def _load_log() -> list[dict]:
     return entries
 
 
-def _append_log(phonemes: int, seconds: float, model: str) -> None:
+def _append_log(
+    phonemes: int,
+    seconds: float,
+    model: str,
+    speed_samples: int | None = None,
+    speed_seconds: float | None = None,
+) -> None:
     LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
-    entry = {"phonemes": phonemes, "seconds": round(seconds, 2), "model": model}
+    entry: dict = {"phonemes": phonemes, "seconds": round(seconds, 2), "model": model}
+    if speed_samples is not None and speed_seconds is not None:
+        entry["speed_samples"] = speed_samples
+        entry["speed_seconds"] = round(speed_seconds, 3)
     with open(LOG_FILE, "a", encoding="utf-8") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -91,19 +101,88 @@ def _estimate_seconds(phonemes: int, model: str) -> float | None:
     return max(est, 1.0)
 
 
+def _estimate_speed_seconds(audio_samples: int) -> float | None:
+    """Return estimated speed-adjustment time based on audio sample count, or None."""
+    entries = [e for e in _load_log()
+               if "speed_samples" in e and "speed_seconds" in e]
+    if len(entries) < _MIN_SAMPLES_FOR_ESTIMATE:
+        return None
+    # Linear regression: speed_seconds = a * speed_samples + b
+    n   = len(entries)
+    sx  = sum(e["speed_samples"] for e in entries)
+    sy  = sum(e["speed_seconds"] for e in entries)
+    sxx = sum(e["speed_samples"] ** 2                  for e in entries)
+    sxy = sum(e["speed_samples"] * e["speed_seconds"]  for e in entries)
+    denom = n * sxx - sx * sx
+    if denom == 0:
+        return sy / n
+    a = (n * sxy - sx * sy) / denom
+    b = (sy - a * sx) / n
+    return max(a * audio_samples + b, 0.1)
+
+
 # ── Progress display ─────────────────────────────────────────────────────────
 
-def _progress_bar(elapsed: float, total_est: float, width: int = 30) -> str:
+def _progress_bar(elapsed: float, total_est: float, label: str = "", width: int = 20) -> str:
     frac = min(elapsed / total_est, 1.0) if total_est > 0 else 0
     filled = int(width * frac)
     bar = "█" * filled + "░" * (width - filled)
-    return f"\r  [{bar}] {elapsed:.0f}s / ~{total_est:.0f}s"
+    prefix = f"  {label} " if label else "  "
+    return f"\r{prefix}[{bar}] {elapsed:.0f}s / ~{total_est:.0f}s"
 
 
-def _progress_spinner(elapsed: float) -> str:
+def _progress_spinner(elapsed: float, label: str = "") -> str:
     frames = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
     frame = frames[int(elapsed * 4) % len(frames)]
-    return f"\r  {frame} Synthesizing... {elapsed:.0f}s"
+    suffix = f" {label}..." if label else "..."
+    return f"\r  {frame}{suffix} {elapsed:.0f}s"
+
+
+def _run_stage(label: str, est: float | None, fn, *args):
+    """Run fn(*args) in a background thread with live progress on stderr.
+
+    Shows a spinner (est=None) or a progress bar (est given).
+    On completion prints a persistent '✓ label  X.Xs' line.
+    Returns (result, elapsed_seconds).
+    """
+    result: list = []
+    error:  list = []
+
+    def _worker():
+        try:
+            result.append(fn(*args))
+        except Exception as exc:
+            error.append(exc)
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t0 = time.monotonic()
+    t.start()
+
+    is_tty = sys.stderr.isatty()
+    try:
+        while t.is_alive():
+            t.join(timeout=0.25)
+            if is_tty:
+                elapsed = time.monotonic() - t0
+                if est is not None:
+                    sys.stderr.write(_progress_bar(elapsed, est, label))
+                else:
+                    sys.stderr.write(_progress_spinner(elapsed, label))
+                sys.stderr.flush()
+    except KeyboardInterrupt:
+        if is_tty:
+            sys.stderr.write("\r" + " " * 70 + "\r")
+            sys.stderr.flush()
+        raise
+
+    elapsed = time.monotonic() - t0
+    if is_tty:
+        sys.stderr.write("\r" + " " * 70 + f"\r  \u2713 {label}  {elapsed:.1f}s\n")
+        sys.stderr.flush()
+
+    if error:
+        raise error[0]
+    return (result[0] if result else None), elapsed
 
 
 # ── Speed adjustment ─────────────────────────────────────────────────────────
@@ -221,64 +300,37 @@ def synthesize(
     else:
         os.environ["HF_HUB_OFFLINE"] = "1"
 
-    # Count phonemes (cheap) before loading the model
-    phonemes = _count_phonemes(text)
-    est = _estimate_seconds(phonemes, model_alias)
-
+    # Defer heavy imports
     import soundfile as sf
     from kittentts import KittenTTS
-    import threading
 
-    tts = KittenTTS(repo_id, cache_dir=cache_dir)
+    # Stage 1: Phonemize — estimate scales with text length (espeak backend load + processing)
+    est_phonemize = max(2.0, len(text) / 2_000) if len(text) > 200 else None
+    phonemes, _ = _run_stage("Phonemizing", est_phonemize, _count_phonemes, text)
 
-    if est is not None:
-        print(f"  Synthesizing (~{est:.0f}s estimated)...", file=sys.stderr)
-    else:
-        print("  Synthesizing (this may take a while)...", file=sys.stderr)
+    # Stage 2: Load model — fixed cost, no reliable estimate
+    tts, _ = _run_stage(
+        f"Loading model ({model_alias})", None,
+        lambda: KittenTTS(repo_id, cache_dir=cache_dir),
+    )
 
-    # Run generation in a thread so we can show progress on the main thread
-    result: list = []
-    error: list  = []
+    # Stage 3: Synthesize — estimate from historical log
+    est_synth = _estimate_seconds(phonemes, model_alias)
+    audio, elapsed_synth = _run_stage(
+        "Synthesizing", est_synth,
+        lambda: tts.generate(text, voice=voice, clean_text=False),
+    )
 
-    def _generate():
-        try:
-            result.append(tts.generate(text, voice=voice, clean_text=False))
-        except Exception as exc:
-            error.append(exc)
-
-    t = threading.Thread(target=_generate, daemon=True)
-    t0 = time.monotonic()
-    t.start()
-
-    is_tty = sys.stderr.isatty()
-    try:
-        while t.is_alive():
-            t.join(timeout=0.25)
-            if is_tty:
-                elapsed = time.monotonic() - t0
-                if est is not None:
-                    sys.stderr.write(_progress_bar(elapsed, est))
-                else:
-                    sys.stderr.write(_progress_spinner(elapsed))
-                sys.stderr.flush()
-    except KeyboardInterrupt:
-        if is_tty:
-            sys.stderr.write("\r" + " " * 60 + "\r")
-            sys.stderr.flush()
-        raise
-
-    elapsed = time.monotonic() - t0
-
-    if is_tty:
-        # Clear the progress line
-        sys.stderr.write("\r" + " " * 60 + "\r")
-        sys.stderr.flush()
-
-    if error:
-        raise error[0]
-
-    audio = result[0]
+    # Stage 4: Adjust speed (only when needed) — estimate from log, fallback to heuristic
+    speed_samples: int | None = None
+    elapsed_speed: float | None = None
     if speed != 1.0:
-        audio = adjust_speed(audio, speed)
+        audio_samples = len(audio)
+        est_speed = _estimate_speed_seconds(audio_samples) or max(0.5, audio_samples / 24_000 / 15)
+        audio, elapsed_speed = _run_stage(
+            f"Adjusting speed ({speed}×)", est_speed, adjust_speed, audio, speed,
+        )
+        speed_samples = audio_samples
+
     sf.write(output_path, audio, 24_000)
-    _append_log(phonemes, elapsed, model_alias)
+    _append_log(phonemes, elapsed_synth, model_alias, speed_samples, elapsed_speed)
