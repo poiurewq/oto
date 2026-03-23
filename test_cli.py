@@ -120,7 +120,7 @@ class TestFlagParsing(unittest.TestCase):
     def test_undownloaded_model_exits(self):
         """--model with a valid but not-downloaded model should exit 1."""
         with mock.patch('mew.config.is_downloaded', return_value=False):
-            _, err, code = _run_cli(['--model', 'nano', 'file.md'])
+            _, err, code = _run_cli(['--model', 'fp16', 'file.md'])
         self.assertEqual(code, 1)
         self.assertIn('not downloaded', err)
 
@@ -138,7 +138,7 @@ class TestFlagParsing(unittest.TestCase):
         """--voice should accept case-insensitive names."""
         with mock.patch('mew.config.is_downloaded', return_value=True):
             # Should not fail on validation (will fail on file not found)
-            _, err, code = _run_cli(['--voice', 'hugo', 'nonexistent.md'])
+            _, err, code = _run_cli(['--voice', 'adam', 'nonexistent.md'])
         # The error should be about the file, not the voice name
         self.assertIn('file not found', err)
         self.assertNotIn('unknown voice', err)

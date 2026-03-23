@@ -4,22 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mew"
-version = "0.2.0"
-description = "Preprocess Markdown study notes and synthesize speech via KittenTTS"
-requires-python = ">=3.9"
+version = "0.3.0"
+description = "Preprocess Markdown study notes and synthesize speech via Kokoro TTS"
+requires-python = ">=3.10"
 dependencies = [
-    "onnxruntime>=1.19.2",
+    "kokoro-onnx>=0.5.0",
     "soundfile>=0.13.1",
-    "numpy",
-    "huggingface_hub>=1.7.2",
-    "num2words",
-    "phonemizer",
-    "espeakng_loader",
-    # spacy was listed here but is not imported by mew or kittentts at runtime.
-    # kittentts is not on PyPI; install with --no-deps to avoid misaki[en],
-    # which pulls torch and CUDA (~700MB–3GB) that are unused when clean_text=False.
-    # Install from:
-    # https://github.com/KittenML/KittenTTS/releases/download/0.8.1/kittentts-0.8.1-py3-none-any.whl
+    "numpy>=2.0",
 ]
 
 [project.scripts]

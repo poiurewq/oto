@@ -13,7 +13,7 @@ _SYNOPSIS = """\
 Usage: mew [options] file [file ...]
        mew config [model|voice|playback|speed|show]
 
-  Convert study notes to speech via KittenTTS.
+  Convert study notes to speech via Kokoro TTS.
 
 Type 'mew -h' for full usage."""
 
@@ -21,7 +21,7 @@ _HELP = """\
 Usage: mew [options] file [file ...]
        mew config [model|voice|playback|speed|show]
 
-  Preprocess note files and synthesize them to speech via KittenTTS.
+  Preprocess note files and synthesize them to speech via Kokoro TTS.
 
 Subcommands:
   config           Interactively set model, voice, playback, and speed

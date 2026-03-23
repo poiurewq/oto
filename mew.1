@@ -1,22 +1,31 @@
 .\" mew.1 — manual page for mew
 .\" -----------------------------------------------------------------------
-.TH MEW 1 "March 2026" "mew 0.1.0" "User Commands"
+.TH MEW 1 "March 23, 2026" "mew 0.3.0" "User Commands"
 .\" -----------------------------------------------------------------------
 .SH NAME
-mew \- preprocess study notes and synthesize speech via KittenTTS
+mew \- preprocess study notes and synthesize speech via Kokoro TTS
 .\" -----------------------------------------------------------------------
 .SH SYNOPSIS
 .B mew
 .RB [ \-h ]
 .RB [ \-i " | " \-p ]
+.RB [ \-n ]
+.RB [ \-P ]
+.RB [ \-v
+.IR voice ]
+.RB [ \-m
+.IR model ]
+.RB [ \-s
+.IR speed ]
 .I file
+.RI [ file\~ .\|.\|.]
 .\" -----------------------------------------------------------------------
 .SH DESCRIPTION
 .B mew
-takes a note file, runs it through a text preprocessing pipeline
-optimised for natural-sounding speech output, then synthesizes the result
-to a WAV file using the KittenTTS engine directly via a self-contained
-Python venv.
+takes one or more note files, runs each through a text preprocessing
+pipeline optimised for natural-sounding speech output, then synthesizes
+the result to a WAV file using the Kokoro TTS engine (ONNX) via a
+self-contained Python venv.
 .PP
 By default, only the synthesized audio is written:
 .TP
@@ -33,22 +42,46 @@ is given.
 .BR \-h ", " \-\-help
 Print a short usage summary and exit.
 .TP
-.B \-i
+.BR \-V ", " \-\-version
+Print the version number and exit.
+.TP
+.BR \-i ", " \-\-intermediate
 Intermediate only: preprocess the input and write
 .IR file.mew.md ,
 then exit without synthesizing.
 Mutually exclusive with
 .BR \-p .
 .TP
-.B \-p
+.BR \-p ", " \-\-preprocessed
 Pre-processed: treat
 .I file
 as already preprocessed and skip straight to synthesis.
 Mutually exclusive with
 .BR \-i .
 .TP
-.B \-\-version
-Print the version number and exit.
+.BR \-n ", " \-\-dry\-run
+Preview preprocessed text on stdout and an estimated synthesis time on
+stderr; do not create any files.
+.TP
+.BR \-v ", " \-\-voice " " \fIVOICE\fR
+One-off voice override for this invocation (does not change config).
+See
+.B CONFIGURATION
+for available voices.
+.TP
+.BR \-m ", " \-\-model " " \fIMODEL\fR
+One-off model override for this invocation (does not change config).
+Must be a downloaded model.
+.TP
+.BR \-P ", " \-\-play
+Auto-play audio after synthesis.
+Mutually exclusive with
+.BR \-i .
+.TP
+.BR \-s ", " \-\-speed " " \fISPEED\fR
+Playback speed multiplier, 1.0\(en3.0 (default: 1.0).
+Speeds up to 2.0 are handled natively by Kokoro (preserving prosody);
+speeds above 2.0 additionally apply WSOLA time-stretching.
 .\" -----------------------------------------------------------------------
 .SH CONFIGURATION
 Run
@@ -61,21 +94,32 @@ and used on every subsequent synthesis run.
 .B Subcommands:
 .TP
 .B mew config
-Interactive prompt: offers to change model and/or voice.
+Interactive prompt: offers to change model, voice, playback method, and speed.
 .TP
 .B mew config model
 Change model only.
-Available models:
-.BR mini " (best quality),"
-.BR micro " (balanced),"
-.BR nano " (fast, compact),"
-.BR nano-int8 " (fast, quantized)."
+Available models (Kokoro-82M v1.0 ONNX variants):
+.BR int8 " (compact, 88 MB),"
+.BR fp16 " (balanced, 169 MB),"
+.BR fp32 " (full precision, 310 MB)."
 If the chosen model has not been downloaded, you are prompted to download it.
 .TP
 .B mew config voice
 Change voice only.
-Available voices:
-.BR Bella ", " Jasper ", " Luna ", " Bruno ", " Rosie ", " Hugo ", " Kiki ", " Leo .
+American female voices:
+.BR Heart ", " Bella ", " Sarah ", " Nova ", " Nicole ", " Jessica .
+American male voices:
+.BR Adam ", " Michael ", " Eric ", " Liam .
+British female voices:
+.BR Emma ", " Alice .
+British male voices:
+.BR George ", " Daniel .
+.TP
+.B mew config playback
+Change the playback method (terminal or app).
+.TP
+.B mew config speed
+Change the default speed multiplier.
 .TP
 .B mew config delete
 Interactively select a downloaded model to remove from the cache.
@@ -95,8 +139,8 @@ Repeated sections (identified by duplicate
 headings) are removed; only the first occurrence is kept.
 .TP
 .B Unicode normalisation
-Typographic characters are replaced with ASCII equivalents understood by
-KittenTTS: curly quotes become straight quotes, em\-dashes become
+Typographic characters are replaced with ASCII equivalents:
+curly quotes become straight quotes, em\-dashes become
 .B \-\-
 (a dramatic pause marker), en\-dashes become
 .IR " to " ,
@@ -112,7 +156,6 @@ are stripped entirely.
 Bracket\-enclosed text such as
 .B [word]
 has its brackets removed but the content kept.
-KittenTTS may stumble on bracket characters.
 .TP
 .B Parenthetical expansion
 Common parenthetical abbreviations are rewritten as inline clauses:
@@ -177,11 +220,6 @@ Heading markers
 and emphasis markers
 .RB ( ** ", " * ", " __ ", " _ )
 are removed.
-KittenTTS may read
-.B #
-and
-.B *
-as literal characters.
 .TP
 .B Acronym expansion (first use)
 Known acronyms are expanded on their first appearance only.
@@ -197,6 +235,13 @@ Sentences beginning with a subordinating conjunction or preposition
 that are missing a comma before the main\-clause subject have one
 inserted automatically.
 .TP
+.B Breathing commas
+In sentences over 20 words, a comma is inserted before the first
+coordinating conjunction
+.RB ( and ", " but ", " or ", " so ", " yet )
+that does not already have one, provided at least 10 words precede it.
+This prevents the flat, breathless quality of long unbroken clauses.
+.TP
 .B List numbering
 Bullet items
 .RB ( \- )
@@ -211,7 +256,7 @@ Both labels reset the counter independently.
 Each
 .B ##
 heading is preceded by an ellipsis line and surrounded by double blank
-lines, so KittenTTS produces a natural silence at each section transition.
+lines, producing a natural silence at each section transition.
 Label lines are followed by an extra blank line for additional breathing
 room before the numbered items.
 .TP
@@ -219,14 +264,22 @@ room before the numbered items.
 Any non\-empty line that still lacks terminal punctuation
 .RB ( . ", " ? ", " ! ", " : )
 has a period appended, ensuring the engine pauses at every logical break.
+.TP
+.B Quote wrapping
+Content lines are wrapped in double quotes
+.RB ( \(lq\~\fItext\fR\~\(rq ).
+Kokoro\-family TTS engines read quoted text with more varied intonation
+and emphasis, reducing the flat, robotic quality of unquoted input.
+Blank lines, section break markers, and lines already containing quotes
+are left unwrapped.
 .\" -----------------------------------------------------------------------
 .SH FILES
 .TP
 .I $(brew \-\-prefix)/bin/mew
 Wrapper script that delegates to the mew entry point inside the Homebrew-managed venv.
 .TP
-.I $(brew \-\-prefix)/opt/mew/libexec/venv/
-Python virtual environment containing mew, kittentts, and their
+.I /opt/homebrew/var/mew/venv/
+Python virtual environment containing mew, kokoro\-onnx, and their
 dependencies.
 Managed by Homebrew; do not modify directly.
 .TP
@@ -236,9 +289,10 @@ Created automatically when preferences are first saved via
 .BR "mew config" .
 .TP
 .I ~/.cache/mew/models/
-KittenTTS model cache; one subdirectory per model alias, populated
-automatically on first use or when downloading via
+Kokoro model and voice files, downloaded automatically on first use or
+via
 .BR "mew config" .
+Contains the ONNX model file and voice embeddings.
 .TP
 .I ~/.local/share/mew/synthesis.jsonl
 Synthesis timing log.
@@ -254,6 +308,18 @@ Synthesize a single note file (produces notes.mew.wav):
 .B mew notes.md
 .RE
 .PP
+Synthesize and auto-play:
+.PP
+.RS
+.B mew \-P notes.md
+.RE
+.PP
+Synthesize at 1.5\(mu speed with a specific voice:
+.PP
+.RS
+.B mew \-s 1.5 \-v Sarah notes.md
+.RE
+.PP
 Export the preprocessed text for inspection, then synthesize it:
 .PP
 .RS
@@ -262,6 +328,12 @@ mew \-i notes.md        # writes notes.mew.md
 less notes.mew.md       # review
 mew \-p notes.mew.md    # writes notes.mew.wav
 .fi
+.RE
+.PP
+Preview preprocessed text without creating files:
+.PP
+.RS
+.B mew \-n notes.md
 .RE
 .\" -----------------------------------------------------------------------
 .SH EXIT STATUS

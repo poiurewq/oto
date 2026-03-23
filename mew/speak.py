@@ -1,5 +1,5 @@
 """
-mew.speak — synthesize text to a WAV file via KittenTTS.
+mew.speak — synthesize text to a WAV file via Kokoro TTS (ONNX).
 """
 
 from __future__ import annotations
@@ -10,21 +10,28 @@ import sys
 import threading
 import time
 from pathlib import Path
+from urllib.request import urlretrieve
 
 from mew.config import DEFAULTS
 
+# kokoro-onnx release assets (v1.0)
+_KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 MODEL_REGISTRY = {
-    "mini":      "KittenML/kitten-tts-mini-0.8",
-    "micro":     "KittenML/kitten-tts-micro-0.8",
-    "nano":      "KittenML/kitten-tts-nano-0.8",
-    "nano-int8": "KittenML/kitten-tts-nano-0.8-int8",
+    "int8":  {"file": "kokoro-v1.0.int8.onnx",  "desc": "Compact (88 MB)",   "size_mb": 88},
+    "fp16":  {"file": "kokoro-v1.0.fp16.onnx",  "desc": "Balanced (169 MB)",  "size_mb": 169},
+    "fp32":  {"file": "kokoro-v1.0.onnx",        "desc": "Full precision (310 MB)", "size_mb": 310},
 }
+_VOICES_FILE = "voices-v1.0.bin"
 
 PREFS_FILE = Path.home() / ".config" / "mew" / "prefs.json"
 CACHE_DIR  = Path.home() / ".cache"  / "mew" / "models"
 LOG_FILE   = Path.home() / ".local" / "share" / "mew" / "synthesis.jsonl"
 
 _MIN_SAMPLES_FOR_ESTIMATE = 3
+
+# Kokoro's native speed range — outside this, fall back to WSOLA.
+_KOKORO_MIN_SPEED = 0.5
+_KOKORO_MAX_SPEED = 2.0
 
 
 def _load_prefs() -> dict:
@@ -36,18 +43,85 @@ def _load_prefs() -> dict:
     return dict(DEFAULTS)
 
 
+# ── Model file management ──────────────────────────────────────────────────
+
+def _model_path(model_alias: str) -> Path:
+    """Return the path to the ONNX model file for *model_alias*."""
+    info = MODEL_REGISTRY.get(model_alias, MODEL_REGISTRY["int8"])
+    return CACHE_DIR / info["file"]
+
+
+def _voices_path() -> Path:
+    return CACHE_DIR / _VOICES_FILE
+
+
+def _download_file(url: str, dest: Path, label: str) -> None:
+    """Download *url* to *dest* with a progress display."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".tmp")
+
+    is_tty = sys.stderr.isatty()
+    last_report = [0.0]
+
+    def _reporthook(block_num, block_size, total_size):
+        if not is_tty:
+            return
+        downloaded = block_num * block_size
+        now = time.monotonic()
+        if now - last_report[0] < 0.25 and downloaded < total_size:
+            return
+        last_report[0] = now
+        if total_size > 0:
+            pct = min(100, downloaded * 100 // total_size)
+            mb_done = downloaded / 1_048_576
+            mb_total = total_size / 1_048_576
+            sys.stderr.write(f"\r  {label}: {mb_done:.0f}/{mb_total:.0f} MB ({pct}%)")
+        else:
+            mb_done = downloaded / 1_048_576
+            sys.stderr.write(f"\r  {label}: {mb_done:.0f} MB")
+        sys.stderr.flush()
+
+    try:
+        urlretrieve(url, str(tmp), reporthook=_reporthook)
+        tmp.rename(dest)
+        if is_tty:
+            sys.stderr.write(f"\r  \u2713 {label}" + " " * 30 + "\n")
+            sys.stderr.flush()
+    except Exception:
+        if tmp.exists():
+            tmp.unlink()
+        raise
+
+
+def ensure_model(model_alias: str) -> tuple[Path, Path]:
+    """Return (model_path, voices_path), downloading if necessary."""
+    mp = _model_path(model_alias)
+    vp = _voices_path()
+
+    if not mp.exists():
+        info = MODEL_REGISTRY.get(model_alias, MODEL_REGISTRY["int8"])
+        url = f"{_KOKORO_RELEASE}/{info['file']}"
+        print(f"  Downloading Kokoro {model_alias} model (~{info['size_mb']} MB)...",
+              file=sys.stderr)
+        _download_file(url, mp, f"Kokoro {model_alias}")
+
+    if not vp.exists():
+        url = f"{_KOKORO_RELEASE}/{_VOICES_FILE}"
+        print(f"  Downloading Kokoro voice data...", file=sys.stderr)
+        _download_file(url, vp, "Voice data")
+
+    return mp, vp
+
+
 # ── Phoneme counting ────────────────────────────────────────────────────────
 
 def _count_phonemes(text: str) -> int:
-    """Count phonemes using the same espeak backend that kittentts uses."""
+    """Count phonemes using the espeak backend."""
     import phonemizer
     backend = phonemizer.backend.EspeakBackend(
         language="en-us", preserve_punctuation=True, with_stress=True,
     )
-    # phonemize returns a list of strings (one per input sentence)
     phonemes = backend.phonemize([text])
-    # Count non-space phoneme characters (consistent with how kittentts
-    # tokenises them via TextCleaner)
     return sum(len(p.replace(" ", "")) for p in phonemes)
 
 
@@ -86,7 +160,6 @@ def _estimate_seconds(phonemes: int, model: str) -> float | None:
     entries = [e for e in _load_log() if e.get("model") == model]
     if len(entries) < _MIN_SAMPLES_FOR_ESTIMATE:
         return None
-    # Simple linear regression: seconds = a * phonemes + b
     n = len(entries)
     sx  = sum(e["phonemes"] for e in entries)
     sy  = sum(e["seconds"]  for e in entries)
@@ -94,7 +167,7 @@ def _estimate_seconds(phonemes: int, model: str) -> float | None:
     sxy = sum(e["phonemes"] * e["seconds"] for e in entries)
     denom = n * sxx - sx * sx
     if denom == 0:
-        return sy / n  # all same phoneme count, return mean
+        return sy / n
     a = (n * sxy - sx * sy) / denom
     b = (sy - a * sx) / n
     est = a * phonemes + b
@@ -107,7 +180,6 @@ def _estimate_speed_seconds(audio_samples: int) -> float | None:
                if "speed_samples" in e and "speed_seconds" in e]
     if len(entries) < _MIN_SAMPLES_FOR_ESTIMATE:
         return None
-    # Linear regression: speed_seconds = a * speed_samples + b
     n   = len(entries)
     sx  = sum(e["speed_samples"] for e in entries)
     sy  = sum(e["speed_seconds"] for e in entries)
@@ -281,56 +353,57 @@ def synthesize(
     Optional *model*, *voice*, and *speed* override the values from
     prefs.json for this invocation only (they do NOT write to prefs.json).
 
-    Heavy imports (kittentts, soundfile) are deferred to this function so
+    Heavy imports (kokoro_onnx, soundfile) are deferred to this function so
     that importing the module does not load the TTS engine.
     """
     prefs       = _load_prefs()
     model_alias = model if model is not None else prefs.get("model", DEFAULTS["model"])
-    voice       = voice if voice is not None else prefs.get("voice", DEFAULTS["voice"])
-    repo_id     = MODEL_REGISTRY.get(model_alias, MODEL_REGISTRY["mini"])
-    cache_dir   = str(CACHE_DIR / model_alias)
+    voice_id    = voice if voice is not None else prefs.get("voice", DEFAULTS["voice"])
 
-    # Check if model needs downloading first
-    model_cache = CACHE_DIR / model_alias
-    needs_download = not model_cache.exists() or not any(model_cache.iterdir())
-    if needs_download:
-        os.environ["HF_HUB_OFFLINE"] = "0"
-        print(f"  Downloading '{model_alias}' model (first run — this may take a minute)...",
-              file=sys.stderr)
-    else:
-        os.environ["HF_HUB_OFFLINE"] = "1"
+    # Resolve friendly voice name → Kokoro voice ID if needed
+    from mew.config import VOICE_REGISTRY
+    if voice_id in VOICE_REGISTRY:
+        voice_id = VOICE_REGISTRY[voice_id]
+
+    # Ensure model files are present (download if needed)
+    mp, vp = ensure_model(model_alias)
 
     # Defer heavy imports
     import soundfile as sf
-    from kittentts import KittenTTS
+    from kokoro_onnx import Kokoro
 
-    # Stage 1: Phonemize — estimate scales with text length (espeak backend load + processing)
+    # Stage 1: Phonemize — estimate scales with text length
     est_phonemize = max(2.0, len(text) / 2_000) if len(text) > 200 else None
     phonemes, _ = _run_stage("Phonemizing", est_phonemize, _count_phonemes, text)
 
-    # Stage 2: Load model — fixed cost, no reliable estimate
+    # Stage 2: Load model
     tts, _ = _run_stage(
         f"Loading model ({model_alias})", None,
-        lambda: KittenTTS(repo_id, cache_dir=cache_dir),
+        lambda: Kokoro(str(mp), str(vp)),
     )
 
-    # Stage 3: Synthesize — estimate from historical log
+    # Stage 3: Synthesize
+    # Kokoro handles speed natively for 0.5–2.0; for >2.0, synthesize at 2.0
+    # then WSOLA the remainder.
+    kokoro_speed = min(speed, _KOKORO_MAX_SPEED)
+    wsola_factor = speed / kokoro_speed if speed > _KOKORO_MAX_SPEED else None
+
     est_synth = _estimate_seconds(phonemes, model_alias)
-    audio, elapsed_synth = _run_stage(
+    (audio, sample_rate), elapsed_synth = _run_stage(
         "Synthesizing", est_synth,
-        lambda: tts.generate(text, voice=voice, clean_text=False),
+        lambda: tts.create(text, voice=voice_id, speed=kokoro_speed, lang="en-us"),
     )
 
-    # Stage 4: Adjust speed (only when needed) — estimate from log, fallback to heuristic
+    # Stage 4: WSOLA post-stretch (only for speeds > 2.0)
     speed_samples: int | None = None
     elapsed_speed: float | None = None
-    if speed != 1.0:
+    if wsola_factor is not None and wsola_factor != 1.0:
         audio_samples = len(audio)
-        est_speed = _estimate_speed_seconds(audio_samples) or max(0.5, audio_samples / 24_000 / 15)
+        est_speed = _estimate_speed_seconds(audio_samples) or max(0.5, audio_samples / sample_rate / 15)
         audio, elapsed_speed = _run_stage(
-            f"Adjusting speed ({speed}×)", est_speed, adjust_speed, audio, speed,
+            f"Adjusting speed ({speed}×)", est_speed, adjust_speed, audio, wsola_factor,
         )
         speed_samples = audio_samples
 
-    sf.write(output_path, audio, 24_000)
+    sf.write(output_path, audio, sample_rate)
     _append_log(phonemes, elapsed_synth, model_alias, speed_samples, elapsed_speed)

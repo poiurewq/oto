@@ -20,23 +20,33 @@ PREFS_FILE = Path.home() / ".config" / "mew" / "prefs.json"
 CACHE_DIR  = Path.home() / ".cache"  / "mew" / "models"
 
 MODEL_REGISTRY = {
-    "mini":      {"repo": "KittenML/kitten-tts-mini-0.8",      "desc": "Best quality"},
-    "micro":     {"repo": "KittenML/kitten-tts-micro-0.8",     "desc": "Balanced"},
-    "nano":      {"repo": "KittenML/kitten-tts-nano-0.8",      "desc": "Fast, compact"},
-    "nano-int8": {"repo": "KittenML/kitten-tts-nano-0.8-int8", "desc": "Fast, quantized"},
+    "int8":  {"file": "kokoro-v1.0.int8.onnx",  "desc": "Compact (88 MB)"},
+    "fp16":  {"file": "kokoro-v1.0.fp16.onnx",  "desc": "Balanced (169 MB)"},
+    "fp32":  {"file": "kokoro-v1.0.onnx",        "desc": "Full precision (310 MB)"},
 }
 MODEL_ALIASES = list(MODEL_REGISTRY.keys())
 
-# Friendly voice names → internal codes (same across all 0.8-series models)
+# Friendly voice names → Kokoro v1.0 voice IDs.
+# A curated subset of the 30+ English voices — covering male/female, US/UK.
 VOICE_REGISTRY = {
-    "Bella":  "expr-voice-2-f",
-    "Jasper": "expr-voice-2-m",
-    "Luna":   "expr-voice-3-f",
-    "Bruno":  "expr-voice-3-m",
-    "Rosie":  "expr-voice-4-f",
-    "Hugo":   "expr-voice-4-m",
-    "Kiki":   "expr-voice-5-f",
-    "Leo":    "expr-voice-5-m",
+    # American female
+    "Heart":    "af_heart",
+    "Bella":    "af_bella",
+    "Sarah":    "af_sarah",
+    "Nova":     "af_nova",
+    "Nicole":   "af_nicole",
+    "Jessica":  "af_jessica",
+    # American male
+    "Adam":     "am_adam",
+    "Michael":  "am_michael",
+    "Eric":     "am_eric",
+    "Liam":     "am_liam",
+    # British female
+    "Emma":     "bf_emma",
+    "Alice":    "bf_alice",
+    # British male
+    "George":   "bm_george",
+    "Daniel":   "bm_daniel",
 }
 VOICE_NAMES = list(VOICE_REGISTRY.keys())
 
@@ -47,7 +57,7 @@ PLAYBACK_OPTIONS = {
 
 SPEED_PRESETS = [1.0, 1.25, 1.5, 2.0, 3.0]
 
-DEFAULTS = {"model": "micro", "voice": "Bruno", "playback": "terminal", "speed": 1.0}
+DEFAULTS = {"model": "int8", "voice": "Adam", "playback": "terminal", "speed": 1.0}
 
 PREVIEW_TEXT = "Here is a preview of this voice."
 
@@ -70,17 +80,12 @@ def save_prefs(prefs: dict) -> None:
 # ── Model helpers ─────────────────────────────────────────────────────────────
 
 def is_downloaded(alias: str) -> bool:
-    model_cache = CACHE_DIR / alias
-    return model_cache.exists() and any(model_cache.iterdir())
+    from mew.speak import _model_path, _voices_path
+    return _model_path(alias).exists() and _voices_path().exists()
 
 def download_model(alias: str) -> None:
-    os.environ["HF_HUB_OFFLINE"] = "0"
-    from kittentts import KittenTTS
-    repo  = MODEL_REGISTRY[alias]["repo"]
-    cache = str(CACHE_DIR / alias)
-    print(f"  Downloading '{alias}' from {repo}...")
-    print(f"  This may take a minute depending on your connection.")
-    KittenTTS(repo, cache_dir=cache)
+    from mew.speak import ensure_model
+    ensure_model(alias)
     print(f"  Model '{alias}' ready.")
 
 
@@ -150,9 +155,12 @@ def select_voice(prefs: dict) -> str:
         print("\nAvailable voices:")
         for i, name in enumerate(VOICE_NAMES, 1):
             code   = VOICE_REGISTRY[name]
-            gender = "female" if code.endswith("-f") else "male"
+            # Derive gender/accent from voice ID prefix
+            prefix = code[:2]
+            accent = "American" if prefix[0] == "a" else "British"
+            gender = "female" if prefix[1] == "f" else "male"
             marker = "  ← current" if name == prefs["voice"] else ""
-            print(f"  {i}. {name:<8}  ({gender}){marker}")
+            print(f"  {i:>2}. {name:<10}  ({accent} {gender}){marker}")
         print()
         raw = input(
             f"Choose voice [1–{len(VOICE_NAMES)}, name, p to preview, "
@@ -257,8 +265,8 @@ def cmd_show(prefs: dict) -> None:
     playback = prefs.get("playback", DEFAULTS["playback"])
     speed    = prefs.get("speed",    DEFAULTS["speed"])
     code  = VOICE_REGISTRY.get(voice, voice)
-    repo  = MODEL_REGISTRY.get(model, {}).get("repo", "unknown")
-    print(f"model    : {model}  ({repo})")
+    desc  = MODEL_REGISTRY.get(model, {}).get("desc", "unknown")
+    print(f"model    : {model}  ({desc})")
     print(f"voice    : {voice}  ({code})")
     print(f"playback : {playback}  ({PLAYBACK_OPTIONS.get(playback, '?')})")
     print(f"speed    : {speed}x")
@@ -352,7 +360,11 @@ def cmd_delete(prefs: dict) -> None:
             print("  Cancelled.")
             return
 
-        shutil.rmtree(str(CACHE_DIR / chosen))
+        # Delete the specific model file, not the entire cache directory
+        from mew.speak import _model_path
+        mp = _model_path(chosen)
+        if mp.exists():
+            mp.unlink()
         print(f"  Model '{chosen}' deleted.")
         return
 
