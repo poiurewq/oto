@@ -15,7 +15,7 @@ Usage: mew [options] file [file ...]
 
   Convert study notes to speech via KittenTTS.
 
-Type 'mew --help' for full usage."""
+Type 'mew -h' for full usage."""
 
 _HELP = """\
 Usage: mew [options] file [file ...]
@@ -186,7 +186,7 @@ def main() -> None:
             break
         if a.startswith("-"):
             print(f"mew: unknown option: {a}", file=sys.stderr)
-            print("Try 'mew --help' for usage.", file=sys.stderr)
+            print("Try 'mew -h' for usage.", file=sys.stderr)
             sys.exit(1)
         positional.append(a)
         i += 1
@@ -246,10 +246,10 @@ def main() -> None:
         return
 
     # ── resolve speed and playback from prefs (with CLI overrides) ────────────
-    from mew.config import load_prefs
+    from mew.config import load_prefs, DEFAULTS
     _prefs = load_prefs()
-    speed: float = speed_override if speed_override is not None else _prefs.get("speed", 1.0)
-    playback_method: str = _prefs.get("playback", "terminal")
+    speed: float = speed_override if speed_override is not None else _prefs.get("speed", DEFAULTS["speed"])
+    playback_method: str = _prefs.get("playback", DEFAULTS["playback"])
 
     # ── process files ─────────────────────────────────────────────────────────
     multi = len(positional) > 1
@@ -321,10 +321,10 @@ def _do_dry_run(
 
     # Estimate duration to stderr (only if tty)
     if sys.stderr.isatty():
-        from mew.config import load_prefs
+        from mew.config import load_prefs, DEFAULTS
         prefs = load_prefs()
-        model_alias = model_override if model_override else prefs.get("model", "micro")
-        voice_name = voice_override if voice_override else prefs.get("voice", "Hugo")
+        model_alias = model_override if model_override else prefs.get("model", DEFAULTS["model"])
+        voice_name = voice_override if voice_override else prefs.get("voice", DEFAULTS["voice"])
         try:
             phonemes = speak._count_phonemes(text)
             est = speak._estimate_seconds(phonemes, model_alias)

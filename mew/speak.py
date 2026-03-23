@@ -10,6 +10,8 @@ import sys
 import time
 from pathlib import Path
 
+from mew.config import DEFAULTS
+
 MODEL_REGISTRY = {
     "mini":      "KittenML/kitten-tts-mini-0.8",
     "micro":     "KittenML/kitten-tts-micro-0.8",
@@ -30,7 +32,7 @@ def _load_prefs() -> dict:
             return json.loads(PREFS_FILE.read_text())
         except (json.JSONDecodeError, OSError):
             pass
-    return {"model": "micro", "voice": "Hugo"}
+    return dict(DEFAULTS)
 
 
 # ── Phoneme counting ────────────────────────────────────────────────────────
@@ -203,19 +205,21 @@ def synthesize(
     Heavy imports (kittentts, soundfile) are deferred to this function so
     that importing the module does not load the TTS engine.
     """
-    os.environ["HF_HUB_OFFLINE"] = "0"
-
     prefs       = _load_prefs()
-    model_alias = model if model is not None else prefs.get("model", "mini")
-    voice       = voice if voice is not None else prefs.get("voice", "Hugo")
+    model_alias = model if model is not None else prefs.get("model", DEFAULTS["model"])
+    voice       = voice if voice is not None else prefs.get("voice", DEFAULTS["voice"])
     repo_id     = MODEL_REGISTRY.get(model_alias, MODEL_REGISTRY["mini"])
     cache_dir   = str(CACHE_DIR / model_alias)
 
     # Check if model needs downloading first
     model_cache = CACHE_DIR / model_alias
-    if not model_cache.exists() or not any(model_cache.iterdir()):
+    needs_download = not model_cache.exists() or not any(model_cache.iterdir())
+    if needs_download:
+        os.environ["HF_HUB_OFFLINE"] = "0"
         print(f"  Downloading '{model_alias}' model (first run — this may take a minute)...",
               file=sys.stderr)
+    else:
+        os.environ["HF_HUB_OFFLINE"] = "1"
 
     # Count phonemes (cheap) before loading the model
     phonemes = _count_phonemes(text)

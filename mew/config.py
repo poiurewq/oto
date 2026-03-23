@@ -47,7 +47,7 @@ PLAYBACK_OPTIONS = {
 
 SPEED_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
 
-DEFAULTS = {"model": "micro", "voice": "Hugo", "playback": "terminal", "speed": 1.0}
+DEFAULTS = {"model": "micro", "voice": "Bruno", "playback": "terminal", "speed": 1.0}
 
 PREVIEW_TEXT = "Here is a preview of this voice."
 
