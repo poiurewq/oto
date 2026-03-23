@@ -11,7 +11,7 @@ from mew import __version__
 
 _SYNOPSIS = """\
 Usage: mew [options] file [file ...]
-       mew config [model|voice|playback|speed|show]
+       mew config [model|voice|playback|speed|subs|show]
 
   Convert study notes to speech via Kokoro TTS.
 
@@ -19,7 +19,7 @@ Type 'mew -h' for full usage."""
 
 _HELP = """\
 Usage: mew [options] file [file ...]
-       mew config [model|voice|playback|speed|show]
+       mew config [model|voice|playback|speed|subs|show]
 
   Preprocess note files and synthesize them to speech via Kokoro TTS.
 
@@ -30,6 +30,7 @@ Subcommands:
   config voice --preview Auto-preview current voice, then change
   config playback        Change playback method only
   config speed     Change default speed only
+  config subs      Manage custom text substitutions (alias: substitutions)
   config delete    Delete a downloaded model
   config show      Print current settings
 
