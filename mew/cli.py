@@ -254,31 +254,35 @@ def main() -> None:
     multi = len(positional) > 1
     had_error = False
 
-    for file_idx, filepath in enumerate(positional, 1):
-        input_path = Path(filepath)
+    try:
+        for file_idx, filepath in enumerate(positional, 1):
+            input_path = Path(filepath)
 
-        if multi:
-            print(f"[{file_idx}/{len(positional)}] {filepath}", file=sys.stderr)
+            if multi:
+                print(f"[{file_idx}/{len(positional)}] {filepath}", file=sys.stderr)
 
-        if not input_path.exists():
-            print(f"mew: file not found: {input_path}", file=sys.stderr)
-            had_error = True
-            continue
+            if not input_path.exists():
+                print(f"mew: file not found: {input_path}", file=sys.stderr)
+                had_error = True
+                continue
 
-        stem = _mew_stem(input_path)
+            stem = _mew_stem(input_path)
 
-        try:
-            if mode == "dry-run":
-                _do_dry_run(input_path, model_override, voice_override, multi)
-            elif mode == "intermediate":
-                _do_intermediate(input_path, stem)
-            elif mode == "preprocessed":
-                _do_preprocessed(input_path, stem, model_override, voice_override, speed, play, playback_method)
-            else:
-                _do_default(input_path, stem, model_override, voice_override, speed, play, playback_method)
-        except Exception as exc:
-            print(f"mew: error processing {filepath}: {exc}", file=sys.stderr)
-            had_error = True
+            try:
+                if mode == "dry-run":
+                    _do_dry_run(input_path, model_override, voice_override, multi)
+                elif mode == "intermediate":
+                    _do_intermediate(input_path, stem)
+                elif mode == "preprocessed":
+                    _do_preprocessed(input_path, stem, model_override, voice_override, speed, play, playback_method)
+                else:
+                    _do_default(input_path, stem, model_override, voice_override, speed, play, playback_method)
+            except Exception as exc:
+                print(f"mew: error processing {filepath}: {exc}", file=sys.stderr)
+                had_error = True
+    except KeyboardInterrupt:
+        print("\n  Cancelled.", file=sys.stderr)
+        sys.exit(0)
 
     if had_error:
         sys.exit(1)

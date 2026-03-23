@@ -107,22 +107,44 @@ def _progress_spinner(elapsed: float) -> str:
 # ── Speed adjustment ─────────────────────────────────────────────────────────
 
 def adjust_speed(samples, speed: float):
-    """Resample audio to change playback speed without pitch correction.
+    """Time-stretch audio using Overlap-Add (OLA).
 
-    speed > 1.0: faster (shorter audio)
-    speed < 1.0: slower (longer audio)
+    Preserves pitch while changing playback speed — avoids the chipmunk
+    effect caused by simple resampling.
 
-    Uses numpy linear interpolation — no scipy needed. Pitch shifts
-    proportionally with speed, which sounds natural for speech.
+    speed > 1.0: faster (shorter audio, same pitch)
+    speed < 1.0: slower (longer audio, same pitch)
     """
     import numpy as np
     if speed == 1.0:
         return samples
-    old_len = len(samples)
-    new_len = int(old_len / speed)
-    old_indices = np.arange(old_len)
-    new_indices = np.linspace(0, old_len - 1, new_len)
-    return np.interp(new_indices, old_indices, samples)
+
+    samples = np.asarray(samples, dtype=np.float32)
+    frame_size = 1024                               # ~43 ms at 24 kHz
+    hop_a = frame_size // 4                         # analysis hop = 256 samples
+    hop_s = max(1, int(round(hop_a / speed)))       # synthesis hop
+
+    window = np.hanning(frame_size).astype(np.float32)
+
+    n_frames = max(1, (len(samples) - frame_size) // hop_a + 1)
+    out_len = hop_s * n_frames + frame_size
+    output = np.zeros(out_len, dtype=np.float32)
+    norm   = np.zeros(out_len, dtype=np.float32)
+
+    for i in range(n_frames):
+        a_start = i * hop_a
+        a_end   = a_start + frame_size
+        if a_end > len(samples):
+            break
+        s_start = i * hop_s
+        output[s_start:s_start + frame_size] += samples[a_start:a_end] * window
+        norm  [s_start:s_start + frame_size] += window
+
+    nonzero = norm > 1e-8
+    output[nonzero] /= norm[nonzero]
+
+    target_len = max(1, int(round(len(samples) / speed)))
+    return output[:target_len]
 
 
 # ── Public API ───────────────────────────────────────────────────────────────
@@ -182,20 +204,26 @@ def synthesize(
         except Exception as exc:
             error.append(exc)
 
-    t = threading.Thread(target=_generate)
+    t = threading.Thread(target=_generate, daemon=True)
     t0 = time.monotonic()
     t.start()
 
     is_tty = sys.stderr.isatty()
-    while t.is_alive():
-        t.join(timeout=0.25)
+    try:
+        while t.is_alive():
+            t.join(timeout=0.25)
+            if is_tty:
+                elapsed = time.monotonic() - t0
+                if est is not None:
+                    sys.stderr.write(_progress_bar(elapsed, est))
+                else:
+                    sys.stderr.write(_progress_spinner(elapsed))
+                sys.stderr.flush()
+    except KeyboardInterrupt:
         if is_tty:
-            elapsed = time.monotonic() - t0
-            if est is not None:
-                sys.stderr.write(_progress_bar(elapsed, est))
-            else:
-                sys.stderr.write(_progress_spinner(elapsed))
+            sys.stderr.write("\r" + " " * 60 + "\r")
             sys.stderr.flush()
+        raise
 
     elapsed = time.monotonic() - t0
 
