@@ -45,7 +45,7 @@ PLAYBACK_OPTIONS = {
     "app":      "Open in default audio player",
 }
 
-SPEED_PRESETS = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0, 3.0]
+SPEED_PRESETS = [1.0, 1.25, 1.5, 2.0, 3.0]
 
 DEFAULTS = {"model": "micro", "voice": "Bruno", "playback": "terminal", "speed": 1.0}
 
@@ -226,8 +226,6 @@ def select_speed(prefs: dict) -> float:
     print(f"\nCurrent default speed: {current}x")
     print()
     labels = {
-        0.5:  "Half speed",
-        0.75: "Slower",
         1.0:  "Normal",
         1.25: "Slightly faster",
         1.5:  "Faster",

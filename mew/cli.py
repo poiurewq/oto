@@ -42,7 +42,7 @@ Options:
   -v, --voice VOICE    One-off voice override (does not change config)
   -m, --model MODEL    One-off model override (does not change config)
   -P, --play           Auto-play audio after synthesis
-  -s, --speed SPEED    Playback speed multiplier 0.5–3.0 (default: 1.0)
+  -s, --speed SPEED    Playback speed multiplier 1.0–3.0 (default: 1.0)
 
 Output (default):   file.mew.wav
 Output (-i):        file.mew.md
@@ -176,8 +176,8 @@ def main() -> None:
             except ValueError:
                 print(f"mew: --speed requires a number, got: {args[i + 1]!r}", file=sys.stderr)
                 sys.exit(1)
-            if not (0.5 <= speed_override <= 3.0):
-                print(f"mew: --speed must be between 0.5 and 3.0, got: {speed_override}", file=sys.stderr)
+            if not (1.0 <= speed_override <= 3.0):
+                print(f"mew: --speed must be between 1.0 and 3.0, got: {speed_override}", file=sys.stderr)
                 sys.exit(1)
             i += 2
             continue
