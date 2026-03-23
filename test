@@ -1,0 +1,15 @@
+#!/bin/bash
+# Run the test suite using the brew venv (same deps as ./dev).
+# Usage: ./test              Run all tests
+#        ./test speak        Run only test_speak
+#        ./test cli           Run only test_cli
+#        ./test preprocess    Run only test_preprocess
+
+VENV="/opt/homebrew/var/mew/venv"
+cd "$(dirname "$0")"
+
+if [ -z "$1" ]; then
+    exec "$VENV/bin/python3.12" -m unittest test_cli test_preprocess test_speak -v
+else
+    exec "$VENV/bin/python3.12" -m unittest "test_$1" -v
+fi
