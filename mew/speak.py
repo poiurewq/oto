@@ -107,10 +107,12 @@ def _progress_spinner(elapsed: float) -> str:
 # ── Speed adjustment ─────────────────────────────────────────────────────────
 
 def adjust_speed(samples, speed: float):
-    """Time-stretch audio using Overlap-Add (OLA).
+    """Time-stretch audio using WSOLA (Waveform Similarity Overlap-Add).
 
-    Preserves pitch while changing playback speed — avoids the chipmunk
-    effect caused by simple resampling.
+    Preserves pitch while changing playback speed.  Unlike plain OLA,
+    WSOLA cross-correlates each frame against the previous output to find
+    the phase-aligned position, avoiding the muffled/phasy artefacts of
+    naive overlap-add.
 
     speed > 1.0: faster (shorter audio, same pitch)
     speed < 1.0: slower (longer audio, same pitch)
@@ -123,6 +125,7 @@ def adjust_speed(samples, speed: float):
     frame_size = 1024                               # ~43 ms at 24 kHz
     hop_a = frame_size // 4                         # analysis hop = 256 samples
     hop_s = max(1, int(round(hop_a / speed)))       # synthesis hop
+    tolerance = frame_size // 2                     # WSOLA search radius
 
     window = np.hanning(frame_size).astype(np.float32)
 
@@ -131,13 +134,48 @@ def adjust_speed(samples, speed: float):
     output = np.zeros(out_len, dtype=np.float32)
     norm   = np.zeros(out_len, dtype=np.float32)
 
+    overlap = max(0, frame_size - hop_s)          # overlap between consecutive output frames
+    prev_frame: np.ndarray | None = None
+
     for i in range(n_frames):
-        a_start = i * hop_a
-        a_end   = a_start + frame_size
+        s_start = i * hop_s
+
+        if i == 0:
+            best = 0
+        else:
+            # Base expected position on frame index (not accumulated offset)
+            # to prevent drift from compounding across frames.
+            expected = i * hop_a
+            lo = max(0, expected - tolerance)
+            hi = min(len(samples) - frame_size, expected + tolerance)
+            if lo > hi:
+                break
+
+            if overlap > 0 and prev_frame is not None:
+                # Correlate tail of previous input frame against the start
+                # of each candidate — this is the region that will overlap
+                # in the output, so phase-aligning here removes artefacts.
+                ref = prev_frame[-overlap:]
+                best_corr = -np.inf
+                best = expected
+                for candidate in range(lo, hi + 1):
+                    seg = samples[candidate:candidate + overlap]
+                    if len(seg) < overlap:
+                        break
+                    corr = np.dot(ref, seg)
+                    if corr > best_corr:
+                        best_corr = corr
+                        best = candidate
+            else:
+                best = expected
+
+        a_end = best + frame_size
         if a_end > len(samples):
             break
-        s_start = i * hop_s
-        output[s_start:s_start + frame_size] += samples[a_start:a_end] * window
+
+        frame = samples[best:a_end]
+        prev_frame = frame
+        output[s_start:s_start + frame_size] += frame * window
         norm  [s_start:s_start + frame_size] += window
 
     nonzero = norm > 1e-8
