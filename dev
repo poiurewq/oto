@@ -1,0 +1,17 @@
+#!/bin/bash
+# Run local mew source against the brew venv (deps + espeak).
+# Usage: ./dev [mew args...]
+#   ./dev --dry-run notes.md
+#   ./dev -v Luna notes.md
+
+VENV="/opt/homebrew/var/mew/venv"
+ESPEAK="$VENV/lib/python3.12/site-packages/espeakng_loader"
+
+export PHONEMIZER_ESPEAK_LIBRARY="$ESPEAK/libespeak-ng.dylib"
+export ESPEAK_DATA_PATH="$ESPEAK"
+export HF_HUB_DISABLE_TELEMETRY=1
+export DO_NOT_TRACK=1
+export PYTHONWARNINGS="ignore::UserWarning:huggingface_hub"
+
+cd "$(dirname "$0")"
+exec "$VENV/bin/python3.12" -m mew "$@"

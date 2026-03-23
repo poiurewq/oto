@@ -2,6 +2,8 @@
 mew.speak — synthesize text to a WAV file via KittenTTS.
 """
 
+from __future__ import annotations
+
 import json
 import os
 import sys
@@ -104,8 +106,17 @@ def _progress_spinner(elapsed: float) -> str:
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
-def synthesize(text: str, output_path: str) -> None:
+def synthesize(
+    text: str,
+    output_path: str,
+    *,
+    model: str | None = None,
+    voice: str | None = None,
+) -> None:
     """Synthesize *text* and write a WAV file to *output_path*.
+
+    Optional *model* and *voice* override the values from prefs.json for
+    this invocation only (they do NOT write to prefs.json).
 
     Heavy imports (kittentts, soundfile) are deferred to this function so
     that importing the module does not load the TTS engine.
@@ -113,8 +124,8 @@ def synthesize(text: str, output_path: str) -> None:
     os.environ["HF_HUB_OFFLINE"] = "0"
 
     prefs       = _load_prefs()
-    model_alias = prefs.get("model", "mini")
-    voice       = prefs.get("voice", "Hugo")
+    model_alias = model if model is not None else prefs.get("model", "mini")
+    voice       = voice if voice is not None else prefs.get("voice", "Hugo")
     repo_id     = MODEL_REGISTRY.get(model_alias, MODEL_REGISTRY["mini"])
     cache_dir   = str(CACHE_DIR / model_alias)
 
