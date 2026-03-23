@@ -116,7 +116,7 @@ def _preview_voice(voice_name: str, prefs: dict) -> None:
         speak.synthesize(PREVIEW_TEXT, tmp_path, model=model, voice=voice_name)
         _play_audio(tmp_path, playback)
     finally:
-        if os.path.exists(tmp_path):
+        if playback != "app" and os.path.exists(tmp_path):
             os.unlink(tmp_path)
 
 
