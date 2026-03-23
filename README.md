@@ -10,7 +10,6 @@ Use the `dev` wrapper script, which runs your local source against the
 brew venv (dependencies + espeak):
 
 ```sh
-cd ~/w/c/brew/scripts/mew
 ./dev --dry-run yourfile.md
 ./dev -v Luna yourfile.md
 ./dev file1.md file2.md
