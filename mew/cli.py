@@ -44,7 +44,7 @@ Options:
   -P, --play           Auto-play audio after synthesis
   -s, --speed SPEED    Playback speed multiplier 1.0–3.0 (default: 1.0)
 
-Output (default):   file.mew.wav
+Output (default):   file.mew.wav  (conflict: file.mew.2.wav, etc.)
 Output (-i):        file.mew.md
 Input  (-p):        expects an already-preprocessed file
 
@@ -70,14 +70,14 @@ def _play_audio(path: Path, method: str) -> None:
 
 
 def _deconflict(path: Path) -> Path:
-    """Return path if it doesn't exist; otherwise notes.mew.wav -> notes-2.mew.wav, etc."""
+    """Return path if it doesn't exist; otherwise notes.mew.wav -> notes.mew.2.wav, etc."""
     if not path.exists():
         return path
-    base = path.with_suffix("").with_suffix("")  # strip both .mew + .ext
-    ext = "".join(path.suffixes)                 # e.g. ".mew.wav" or ".mew.md"
+    stem = path.with_suffix("")  # strip final ext, e.g. notes.mew.wav -> notes.mew
+    final_ext = path.suffix      # e.g. ".wav" or ".md"
     n = 2
     while True:
-        candidate = base.parent / f"{base.name}-{n}{ext}"
+        candidate = stem.parent / f"{stem.name}.{n}{final_ext}"
         if not candidate.exists():
             return candidate
         n += 1
