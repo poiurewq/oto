@@ -1,0 +1,7 @@
+**/*.swp
+**/build/
+**/*.egg-info/
+**/__pycache__/
+**/example/
+**/.DS_Store
+**/CLAUDE.md
