@@ -1,20 +1,20 @@
 """
-preprocess.py — Prepares a Markdown file for KittenTTS ONNS.
+preprocess.py — Prepares a Markdown file for Kokoro TTS (ONNX).
 
 Transformations applied (in pipeline order):
   5.  Deduplicate repeated sections (keeps first occurrence of each ## header)
   9.  Normalize Unicode punctuation:
-        curly quotes → straight, en-dash → " to ", em-dash → "--" (KittenTTS
+        curly quotes → straight, en-dash → " to ", em-dash → "--" (Kokoro
         dramatic pause), ellipsis char → "..."
  []   Strip bracket expressions: [1], [1,2] citation markers removed;
-        [text] brackets removed (content kept) — KittenTTS stumbles on []
+        [text] brackets removed (content kept) — Kokoro stumbles on []
+ SB.  Apply custom text substitutions from ~/.config/mew/substitutions.json
  10.  Expand parenthetical abbreviations:
         (ex. X) → ", such as X"   (i.e. X) → ", that is X"   (e.g. X) → ", for example X"
  RG.  Expand numeric ranges: 10-20 → "ten to twenty", 1990-2024 → "nineteen ninety to..."
   6.  Replace slashes with " or ": and/or, word/word
   1.  Expand inline abbreviations: e.g., i.e., ex., etc.
-  2.  Strip Markdown formatting symbols (#, **, *, _) — KittenTTS stumbles on # and *
-  4.  Expand known acronyms on first use (ACA → ACA, the American Counseling Association,)
+  2.  Strip Markdown formatting symbols (#, **, *, _) — Kokoro stumbles on # and *
  IC.  Add commas after introductory subordinate clauses missing one
         ("When students act as supervisors they must" → "…supervisors, they must")
   3.  Remove bullet dashes (-)
@@ -25,7 +25,7 @@ Transformations applied (in pipeline order):
  BC.  Add breathing commas before conjunctions in long (20+ word) sentences
  QW.  Wrap content lines in double quotes for more expressive TTS prosody
 
-KittenTTS punctuation reference (from engine docs):
+Kokoro TTS punctuation reference (from engine docs):
   ,    comma    — breathing pause, most important for natural flow
   ...  ellipsis — soft hesitation / trailing-off pause
   .    period   — full stop, falling pitch
@@ -33,9 +33,11 @@ KittenTTS punctuation reference (from engine docs):
   ?    question — forces rising pitch at end of phrase
 """
 
+import json
 import re
 import sys
 import os
+from pathlib import Path
 
 # ── Number → words (used by expand_ranges) ────────────────────────────────────
 
@@ -131,10 +133,74 @@ _RE_RANGE = re.compile(r'(?<!\w)(\d+)-(\d+)(?!\w)')
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 
-# 4. Acronyms to expand on first use only.
-ACRONYMS: dict[str, str] = {
-    'ACA': 'ACA, the American Counseling Association,',
-}
+SUBSTITUTIONS_FILE = Path.home() / ".config" / "mew" / "substitutions.json"
+
+
+def _load_substitutions() -> list[dict]:
+    """Load custom substitutions from ~/.config/mew/substitutions.json.
+
+    On first ever call (file absent), seeds the file with default entries
+    so that common titles, abbreviations, and acronyms are handled out of
+    the box.  Returns an empty list only if the file is malformed.
+    Each entry is a dict with keys: find, replace, regex (bool), first_only (bool).
+    """
+    if not SUBSTITUTIONS_FILE.exists():
+        from mew.config import ensure_substitutions_seeded
+        ensure_substitutions_seeded()
+    if not SUBSTITUTIONS_FILE.exists():
+        return []
+    try:
+        data = json.loads(SUBSTITUTIONS_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(data, list):
+        return []
+    subs = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        find = entry.get("find", "")
+        replace = entry.get("replace", "")
+        if not find or not isinstance(find, str) or not isinstance(replace, str):
+            continue
+        subs.append({
+            "find": find,
+            "replace": replace,
+            "regex": bool(entry.get("regex", False)),
+            "first_only": bool(entry.get("first_only", False)),
+        })
+    return subs
+
+
+def _apply_substitutions(line: str, subs: list[dict], seen: set) -> str:
+    """SB. Apply custom text substitutions to a line.
+
+    *subs* is the list from _load_substitutions().
+    *seen* tracks which first_only patterns have already fired (persists across lines).
+    """
+    for sub in subs:
+        key = sub["find"]
+        if sub["first_only"] and key in seen:
+            continue
+        if sub["regex"]:
+            try:
+                pattern = re.compile(sub["find"])
+            except re.error:
+                continue
+            if sub["first_only"]:
+                if pattern.search(line):
+                    line = pattern.sub(sub["replace"], line, count=1)
+                    seen.add(key)
+            else:
+                line = pattern.sub(sub["replace"], line)
+        else:
+            if sub["first_only"]:
+                if sub["find"] in line:
+                    line = line.replace(sub["find"], sub["replace"], 1)
+                    seen.add(key)
+            else:
+                line = line.replace(sub["find"], sub["replace"])
+    return line
 
 # 1. Abbreviation patterns (order matters: longer/more-specific first).
 ABBREVIATIONS: list[tuple] = [
@@ -215,18 +281,18 @@ def _deduplicate(lines: list[str]) -> list[str]:
 
 
 def _normalize_unicode(line: str) -> str:
-    """9. Replace typographic characters with KittenTTS-friendly equivalents."""
+    """9. Replace typographic characters with Kokoro-friendly equivalents."""
     return (line
         .replace('\u2019', "'").replace('\u2018', "'")   # curly apostrophes
         .replace('\u201c', '"').replace('\u201d', '"')   # curly double quotes
-        .replace('\u2014', '--')        # em dash  → dramatic KittenTTS pause
+        .replace('\u2014', '--')        # em dash  → dramatic Kokoro pause
         .replace('\u2013', ' to ')      # en dash  → "to" (ranges)
         .replace('\u2026', '...')       # ellipsis char → three dots
     )
 
 
 def _strip_brackets(line: str) -> str:
-    """Remove [] bracket expressions — KittenTTS stumbles on them."""
+    """Remove [] bracket expressions — Kokoro stumbles on them."""
     line = re.sub(r'\[\d+(?:,\s*\d+)*\]', '', line)   # [1], [1,2] citations
     line = re.sub(r'\[([^\]]*)\]', r'\1', line)        # [text] → text
     return line
@@ -264,7 +330,7 @@ def _expand_abbreviations(line: str) -> str:
 
 
 def _strip_markdown(line: str) -> str:
-    """2. Remove Markdown syntax that KittenTTS would read aloud literally."""
+    """2. Remove Markdown syntax that Kokoro would read aloud literally."""
     line = re.sub(r'^#{1,6}\s+', '', line)               # heading hashes
     line = re.sub(r'\*{1,3}(.+?)\*{1,3}', r'\1', line)  # bold / italic *
     line = re.sub(r'_{1,3}(.+?)_{1,3}', r'\1', line)    # bold / italic _
@@ -272,11 +338,12 @@ def _strip_markdown(line: str) -> str:
 
 
 def _expand_acronyms(line: str, seen: set) -> str:
-    """4. Expand each known acronym on its very first appearance."""
-    for acronym, expansion in ACRONYMS.items():
-        if re.search(rf'\b{re.escape(acronym)}\b', line) and acronym not in seen:
-            line = re.sub(rf'\b{re.escape(acronym)}\b', expansion, line, count=1)
-            seen.add(acronym)
+    """4. Expand each known acronym on its very first appearance.
+
+    DEPRECATED: Kept for backward compatibility. New code should use
+    _apply_substitutions() with ~/.config/mew/substitutions.json instead.
+    This function is no longer called in the pipeline.
+    """
     return line
 
 
@@ -302,7 +369,7 @@ _CONJ_PAT = re.compile(r'(?<![,;])\s+\b(and|but|or|so|yet)\b', re.IGNORECASE)
 def _add_breathing_commas(line: str) -> str:
     """BC. Insert commas before conjunctions in long sentences for natural pacing.
 
-    KittenTTS treats commas as the primary breathing-pause signal.  In sentences
+    Kokoro treats commas as the primary breathing-pause signal.  In sentences
     over 20 words, adding a comma before a coordinating conjunction that isn't
     already preceded by one prevents the flat "breathless run" effect.
     """
@@ -322,7 +389,7 @@ def _add_breathing_commas(line: str) -> str:
 def _wrap_in_quotes(line: str) -> str:
     """QW. Wrap content lines in double quotes for more expressive TTS prosody.
 
-    Kokoro-family TTS engines (including KittenTTS) read quoted text with more
+    Kokoro TTS engines read quoted text with more
     varied intonation and emphasis, reducing the flat/robotic quality of
     unquoted input.  Skip blank lines, section breaks, and lines that already
     contain quotes (to avoid nested-quote confusion).
@@ -352,7 +419,8 @@ def process(input_path: str, output_path: 'str | None' = None) -> str:
 
     lines = _deduplicate(lines)
 
-    seen_acronyms: set = set()
+    substitutions = _load_substitutions()
+    seen_subs: set = set()
     in_list_section = False
     item_count = 0
     out: list[str] = []
@@ -378,13 +446,13 @@ def process(input_path: str, output_path: 'str | None' = None) -> str:
 
         line = _normalize_unicode(raw_line)
         line = _strip_brackets(line)
+        line = _apply_substitutions(line, substitutions, seen_subs)
         line = _expand_parens(line)
         line = _expand_datetimes(line)
         line = _expand_ranges(line)
         line = _handle_slashes(line)
         line = _expand_abbreviations(line)
         line = _strip_markdown(line)
-        line = _expand_acronyms(line, seen_acronyms)
         line = _add_intro_commas(line)
         line = _add_breathing_commas(line)
 

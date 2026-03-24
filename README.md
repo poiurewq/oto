@@ -1,6 +1,6 @@
 # mew
 
-Preprocess Markdown study notes and synthesize speech via KittenTTS.
+Preprocess Markdown study notes and synthesize speech via Kokoro TTS.
 
 ## Local development
 

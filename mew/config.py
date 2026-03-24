@@ -1,23 +1,28 @@
 """
-mew.config — interactive model/voice preference selector.
+mew.config — interactive model/voice/substitutions preference selector.
 
 Usage (via CLI):
   mew config            interactive: optionally change model and voice
   mew config model      change model only
   mew config voice      change voice only
+  mew config subs       manage text substitutions
   mew config delete     delete a downloaded model
   mew config show       print current settings and exit
 
 Preferences are stored in ~/.config/mew/prefs.json.
+Substitutions are stored in ~/.config/mew/substitutions.json.
 """
+
+from __future__ import annotations
 
 import json
 import os
 import shutil
 from pathlib import Path
 
-PREFS_FILE = Path.home() / ".config" / "mew" / "prefs.json"
-CACHE_DIR  = Path.home() / ".cache"  / "mew" / "models"
+PREFS_FILE        = Path.home() / ".config" / "mew" / "prefs.json"
+SUBSTITUTIONS_FILE = Path.home() / ".config" / "mew" / "substitutions.json"
+CACHE_DIR          = Path.home() / ".cache"  / "mew" / "models"
 
 MODEL_REGISTRY = {
     "int8":  {"file": "kokoro-v1.0.int8.onnx",  "desc": "Compact (88 MB)"},
@@ -369,6 +374,189 @@ def cmd_delete(prefs: dict) -> None:
         return
 
 
+# ── Substitutions ────────────────────────────────────────────────────────────
+
+_SEED_SUBSTITUTIONS = [
+    # ── Titles & honorifics ──────────────────────────────────────────────
+    {"find": r"\bDr\.",   "replace": "Doctor",    "regex": True, "first_only": False, "comment": "title"},
+    {"find": r"\bMr\.",   "replace": "Mister",    "regex": True, "first_only": False, "comment": "title"},
+    {"find": r"\bMrs\.",  "replace": "Missus",    "regex": True, "first_only": False, "comment": "title"},
+    {"find": r"\bMs\.",   "replace": "Miz",       "regex": True, "first_only": False, "comment": "title"},
+    {"find": r"\bProf\.", "replace": "Professor", "regex": True, "first_only": False, "comment": "title"},
+    # ── Common written shorthand ─────────────────────────────────────────
+    {"find": "vs.",       "replace": "versus",         "regex": False, "first_only": False},
+    {"find": "approx.",   "replace": "approximately",  "regex": False, "first_only": False},
+    {"find": "dept.",     "replace": "department",     "regex": False, "first_only": False},
+    {"find": "govt.",     "replace": "government",     "regex": False, "first_only": False},
+    {"find": "w/o",       "replace": "without",        "regex": False, "first_only": False, "comment": "must precede w/"},
+    {"find": r"(?<!\w)w/(?!\w)", "replace": "with",    "regex": True,  "first_only": False},
+    # ── Letter-acronyms TTS often mispronounces as words ─────────────────
+    {"find": r"\bCEO\b",  "replace": "C.E.O.",  "regex": True, "first_only": False, "comment": "spell out"},
+    {"find": r"\bCFO\b",  "replace": "C.F.O.",  "regex": True, "first_only": False, "comment": "spell out"},
+    {"find": r"\bCTO\b",  "replace": "C.T.O.",  "regex": True, "first_only": False, "comment": "spell out"},
+    {"find": r"\bPhD\b",  "replace": "P.H.D.",  "regex": True, "first_only": False, "comment": "spell out"},
+    {"find": r"\bDIY\b",  "replace": "D.I.Y.",  "regex": True, "first_only": False, "comment": "spell out"},
+    {"find": r"\bFAQ\b",  "replace": "F.A.Q.",  "regex": True, "first_only": False, "comment": "spell out"},
+]
+
+
+def ensure_substitutions_seeded() -> None:
+    """Create substitutions.json with seed entries if it doesn't exist yet."""
+    if SUBSTITUTIONS_FILE.exists():
+        return
+    _save_substitutions(list(_SEED_SUBSTITUTIONS))
+
+
+def _load_substitutions() -> list[dict]:
+    """Load substitutions.json, returning [] if absent or malformed."""
+    if not SUBSTITUTIONS_FILE.exists():
+        return []
+    try:
+        data = json.loads(SUBSTITUTIONS_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    if not isinstance(data, list):
+        return []
+    return data
+
+
+def _save_substitutions(subs: list[dict]) -> None:
+    SUBSTITUTIONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    SUBSTITUTIONS_FILE.write_text(json.dumps(subs, indent=2) + "\n")
+
+
+def _fmt_sub(entry: dict, idx: int) -> str:
+    """Format a single substitution entry for display."""
+    find = entry.get("find", "")
+    replace = entry.get("replace", "")
+    kind = "regex" if entry.get("regex") else "literal"
+    mode = "first only" if entry.get("first_only") else "all"
+    comment = entry.get("comment", "")
+    suffix = f"  # {comment}" if comment else ""
+    return f"  {idx}. {find!r} → {replace!r}  ({kind}, {mode}){suffix}"
+
+
+def cmd_substitutions(prefs: dict) -> None:
+    """Interactive CRUD for ~/.config/mew/substitutions.json."""
+    import re as _re
+
+    ensure_substitutions_seeded()
+    subs = _load_substitutions()
+
+    while True:
+        print(f"\nSubstitutions ({len(subs)} entries):")
+        if subs:
+            for i, entry in enumerate(subs, 1):
+                print(_fmt_sub(entry, i))
+        else:
+            print("  (none)")
+        print()
+        print("  a. Add entry")
+        if subs:
+            print("  e. Edit entry")
+            print("  d. Delete entry")
+        print()
+        raw = input("Choose [a/e/d, or Enter to exit]: ").strip().lower()
+        if not raw:
+            return
+        if raw == "a":
+            entry = _prompt_sub_entry()
+            if entry is not None:
+                subs.append(entry)
+                _save_substitutions(subs)
+                print("  Added.")
+        elif raw == "e" and subs:
+            idx = _prompt_index("Edit", len(subs))
+            if idx is not None:
+                updated = _prompt_sub_entry(subs[idx])
+                if updated is not None:
+                    subs[idx] = updated
+                    _save_substitutions(subs)
+                    print("  Updated.")
+        elif raw == "d" and subs:
+            idx = _prompt_index("Delete", len(subs))
+            if idx is not None:
+                print(f"  Will delete: {_fmt_sub(subs[idx], idx + 1)}")
+                yn = input("  Confirm? [y/N]: ").strip().lower()
+                if yn in ("y", "yes"):
+                    subs.pop(idx)
+                    _save_substitutions(subs)
+                    print("  Deleted.")
+        else:
+            print("  Invalid choice.")
+
+
+def _prompt_index(action: str, count: int) -> int | None:
+    """Prompt for a 1-based index, return 0-based or None."""
+    raw = input(f"  {action} which entry? [1–{count}, or Enter to cancel]: ").strip()
+    if not raw:
+        return None
+    if raw.isdigit():
+        n = int(raw)
+        if 1 <= n <= count:
+            return n - 1
+    print(f"  Please enter a number (1–{count}).")
+    return None
+
+
+def _prompt_sub_entry(existing: dict | None = None) -> dict | None:
+    """Prompt for substitution fields. Returns dict or None if cancelled.
+
+    If *existing* is provided, Enter keeps the current value for each field.
+    """
+    import re as _re
+
+    is_edit = existing is not None
+    defaults = existing or {}
+
+    # find
+    prompt = f"  find [{defaults.get('find', '')}]: " if is_edit else "  find: "
+    find = input(prompt).strip()
+    if is_edit and not find:
+        find = defaults.get("find", "")
+    if not find:
+        print("  Cancelled (empty find).")
+        return None
+
+    # replace
+    prompt = f"  replace [{defaults.get('replace', '')}]: " if is_edit else "  replace: "
+    replace = input(prompt)
+    if is_edit and replace == "":
+        replace = defaults.get("replace", "")
+
+    # regex flag
+    cur_regex = defaults.get("regex", False)
+    default_label = "Y/n" if cur_regex else "y/N"
+    raw = input(f"  regex? [{default_label}]: ").strip().lower()
+    if raw in ("y", "yes"):
+        is_regex = True
+    elif raw in ("n", "no"):
+        is_regex = False
+    else:
+        is_regex = cur_regex
+
+    # Validate regex
+    if is_regex:
+        try:
+            _re.compile(find)
+        except _re.error as exc:
+            print(f"  Invalid regex: {exc}")
+            return None
+
+    # first_only flag
+    cur_first = defaults.get("first_only", False)
+    default_label = "Y/n" if cur_first else "y/N"
+    raw = input(f"  first occurrence only? [{default_label}]: ").strip().lower()
+    if raw in ("y", "yes"):
+        first_only = True
+    elif raw in ("n", "no"):
+        first_only = False
+    else:
+        first_only = cur_first
+
+    return {"find": find, "replace": replace, "regex": is_regex, "first_only": first_only}
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 def main(args: list[str] | None = None) -> None:
@@ -406,6 +594,9 @@ def _run(args: list[str]) -> None:
         cmd_playback(prefs)
     elif subcmd == "speed":
         cmd_speed(prefs)
+    elif subcmd in ("substitutions", "subs"):
+        cmd_substitutions(prefs)
+        return
     elif subcmd == "delete":
         cmd_delete(prefs)
         return
@@ -415,6 +606,7 @@ def _run(args: list[str]) -> None:
             ("voice",    "Change voice",               cmd_voice),
             ("playback", "Change playback method",    cmd_playback),
             ("speed",    "Change default speed",      cmd_speed),
+            ("subs",     "Manage text substitutions", cmd_substitutions),
             ("delete",   "Delete a downloaded model", cmd_delete),
         ]
         while True:

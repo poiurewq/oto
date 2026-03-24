@@ -121,6 +121,15 @@ Change the playback method (terminal or app).
 .B mew config speed
 Change the default speed multiplier.
 .TP
+.B mew config subs
+Manage custom text substitutions (alias:
+.BR "mew config substitutions" ).
+Opens an interactive CRUD interface to list, add, edit, and delete
+entries in
+.IR ~/.config/mew/substitutions.json .
+On first run, offers to seed the file with common abbreviations and
+acronyms.
+.TP
 .B mew config delete
 Interactively select a downloaded model to remove from the cache.
 Only downloaded models are listed.
@@ -221,12 +230,15 @@ and emphasis markers
 .RB ( ** ", " * ", " __ ", " _ )
 are removed.
 .TP
-.B Acronym expansion (first use)
-Known acronyms are expanded on their first appearance only.
-Currently:
-.B ACA
-\(->
-.IR "ACA, the American Counseling Association," .
+.B Custom text substitutions
+User\-defined find/replace rules from
+.I ~/.config/mew/substitutions.json
+are applied in order.
+Each entry can be a literal string or a regular expression, and can
+optionally be restricted to first occurrence only.
+Run
+.B mew config subs
+to manage entries interactively.
 .TP
 .B Introductory\-clause commas
 Sentences beginning with a subordinating conjunction or preposition
@@ -285,6 +297,17 @@ Managed by Homebrew; do not modify directly.
 .TP
 .I ~/.config/mew/prefs.json
 Persistent model and voice preferences.
+.TP
+.I ~/.config/mew/substitutions.json
+Custom text substitution rules.
+A JSON array of objects with fields
+.BR find ", " replace ", " regex " (bool), " first_only " (bool),"
+and an optional
+.B comment
+field.
+Array order controls execution order.
+Created via
+.BR "mew config subs" .
 Created automatically when preferences are first saved via
 .BR "mew config" .
 .TP
@@ -353,8 +376,9 @@ Introductory\-clause comma insertion uses a heuristic position threshold
 and may occasionally miss or misplace a comma in unusual sentence
 constructions.
 .PP
-Acronym expansion is limited to a small built\-in list; acronyms in other
-subject domains are not expanded automatically.
+Custom substitutions with overlapping patterns may produce unexpected
+results; entries are applied in array order, so earlier rules take
+precedence.
 .\" -----------------------------------------------------------------------
 .SH AUTHOR
 Written for personal study\-note workflows.

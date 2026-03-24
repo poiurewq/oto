@@ -245,31 +245,64 @@ class TestStripMarkdown(unittest.TestCase):
         self.t('text ## not a heading', 'text ## not a heading')
 
 
-# ── _expand_acronyms ──────────────────────────────────────────────────────────
+# ── _apply_substitutions ─────────────────────────────────────────────────────
 
-class TestExpandAcronyms(unittest.TestCase):
+class TestApplySubstitutions(unittest.TestCase):
 
-    def test_first_use_expanded(self):
+    def test_literal_replace_all(self):
+        subs = [{"find": "vs.", "replace": "versus", "regex": False, "first_only": False}]
+        result = P._apply_substitutions("A vs. B vs. C", subs, set())
+        self.assertEqual(result, "A versus B versus C")
+
+    def test_literal_first_only(self):
+        subs = [{"find": "ACA", "replace": "ACA, the American Counseling Association,", "regex": False, "first_only": True}]
         seen = set()
-        result = P._expand_acronyms('following the ACA Code of Ethics', seen)
-        self.assertIn('American Counseling Association', result)
-        self.assertIn('ACA', seen)
+        result = P._apply_substitutions("The ACA Code. The ACA again.", subs, seen)
+        self.assertEqual(result.count("American Counseling Association"), 1)
+        self.assertIn("ACA", seen)
 
-    def test_second_use_not_expanded(self):
-        seen = {'ACA'}
-        result = P._expand_acronyms('following the ACA Code of Ethics', seen)
-        self.assertEqual(result, 'following the ACA Code of Ethics')
-
-    def test_unknown_acronym_unchanged(self):
+    def test_first_only_seen_persists_across_lines(self):
+        subs = [{"find": "ACA", "replace": "expanded", "regex": False, "first_only": True}]
         seen = set()
-        result = P._expand_acronyms('refer to the DSM criteria', seen)
-        self.assertEqual(result, 'refer to the DSM criteria')
-        self.assertEqual(seen, set())
+        P._apply_substitutions("ACA here", subs, seen)
+        result = P._apply_substitutions("ACA again", subs, seen)
+        self.assertEqual(result, "ACA again")
 
-    def test_seen_set_mutated(self):
+    def test_regex_replace(self):
+        subs = [{"find": r"\bCEO\b", "replace": "C.E.O.", "regex": True, "first_only": False}]
+        result = P._apply_substitutions("The CEO spoke to other CEO leaders", subs, set())
+        self.assertEqual(result, "The C.E.O. spoke to other C.E.O. leaders")
+
+    def test_regex_first_only(self):
+        subs = [{"find": r"\bWHO\b", "replace": "WHO, the World Health Organization,", "regex": True, "first_only": True}]
         seen = set()
-        P._expand_acronyms('ACA guidelines', seen)
-        self.assertIn('ACA', seen)
+        result = P._apply_substitutions("The WHO released. WHO guidelines.", subs, seen)
+        self.assertEqual(result.count("World Health Organization"), 1)
+        self.assertIn(r"\bWHO\b", seen)
+
+    def test_regex_backreference(self):
+        subs = [{"find": r"\b(\d+)mg\b", "replace": r"\1 milligrams", "regex": True, "first_only": False}]
+        result = P._apply_substitutions("Take 500mg daily", subs, set())
+        self.assertEqual(result, "Take 500 milligrams daily")
+
+    def test_ordering_matters(self):
+        """Earlier entries take precedence over later ones."""
+        subs = [
+            {"find": "w/o", "replace": "without", "regex": False, "first_only": False},
+            {"find": "w/", "replace": "with", "regex": False, "first_only": False},
+        ]
+        result = P._apply_substitutions("go w/o it and w/ friends", subs, set())
+        self.assertIn("without", result)
+        self.assertIn("with", result)
+
+    def test_empty_subs_no_change(self):
+        result = P._apply_substitutions("unchanged text", [], set())
+        self.assertEqual(result, "unchanged text")
+
+    def test_invalid_regex_skipped(self):
+        subs = [{"find": r"[invalid", "replace": "x", "regex": True, "first_only": False}]
+        result = P._apply_substitutions("some text", subs, set())
+        self.assertEqual(result, "some text")
 
 
 # ── _add_intro_commas ─────────────────────────────────────────────────────────
@@ -429,12 +462,28 @@ class TestProcess(unittest.TestCase):
         out = self._run(block + block)
         self.assertEqual(out.count('"Section."'), 1)
 
-    def test_acronym_first_use_only(self):
-        out = self._run('## S\nThe ACA Code. The ACA again.\n')
-        self.assertEqual(
-            out.count('American Counseling Association'), 1,
-            'ACA should be expanded exactly once',
-        )
+    def test_substitutions_applied_when_file_exists(self):
+        """Substitutions from file are applied during process()."""
+        import json
+        subs_file = P.SUBSTITUTIONS_FILE
+        had_file = subs_file.exists()
+        old_content = subs_file.read_text() if had_file else None
+        try:
+            subs_file.parent.mkdir(parents=True, exist_ok=True)
+            subs_file.write_text(json.dumps([
+                {"find": r"\bACA\b", "replace": "ACA, the American Counseling Association,",
+                 "regex": True, "first_only": True},
+            ]))
+            out = self._run('## S\nThe ACA Code. The ACA again.\n')
+            self.assertEqual(
+                out.count('American Counseling Association'), 1,
+                'ACA should be expanded exactly once via substitutions',
+            )
+        finally:
+            if old_content is not None:
+                subs_file.write_text(old_content)
+            elif subs_file.exists():
+                subs_file.unlink()
 
     def test_slash_converted(self):
         out = self._run('## S\nstudents/supervisees must comply.\n')
