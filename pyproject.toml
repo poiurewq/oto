@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oto"
-version = "0.3.1"
+version = "0.4.0"
 description = "Preprocess Markdown study notes and synthesize speech via Kokoro TTS"
 requires-python = ">=3.10"
 dependencies = [
