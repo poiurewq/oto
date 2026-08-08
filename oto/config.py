@@ -31,25 +31,19 @@ MODEL_REGISTRY = {
 }
 MODEL_ALIASES = list(MODEL_REGISTRY.keys())
 
-# Friendly voice names → Kokoro v1.0 voice IDs.
-# A curated subset of the 30+ English voices — covering male/female, US/UK.
 VOICE_REGISTRY = {
-    # American female
     "Heart":    "af_heart",
     "Bella":    "af_bella",
     "Sarah":    "af_sarah",
     "Nova":     "af_nova",
     "Nicole":   "af_nicole",
     "Jessica":  "af_jessica",
-    # American male
     "Adam":     "am_adam",
     "Michael":  "am_michael",
     "Eric":     "am_eric",
     "Liam":     "am_liam",
-    # British female
     "Emma":     "bf_emma",
     "Alice":    "bf_alice",
-    # British male
     "George":   "bm_george",
     "Daniel":   "bm_daniel",
 }
@@ -67,7 +61,6 @@ DEFAULTS = {"model": "int8", "voice": "Adam", "playback": "terminal", "speed": 1
 PREVIEW_TEXT = "Here is a preview of this voice."
 
 
-# ── Prefs I/O ─────────────────────────────────────────────────────────────────
 
 def load_prefs() -> dict:
     if PREFS_FILE.exists():
@@ -82,7 +75,6 @@ def save_prefs(prefs: dict) -> None:
     PREFS_FILE.write_text(json.dumps(prefs, indent=2) + "\n")
 
 
-# ── Model helpers ─────────────────────────────────────────────────────────────
 
 def is_downloaded(alias: str) -> bool:
     from oto.speak import _model_path, _voices_path
@@ -94,7 +86,6 @@ def download_model(alias: str) -> None:
     print(f"  Model '{alias}' ready.")
 
 
-# ── Playback / preview helpers ────────────────────────────────────────────────
 
 def _play_audio(path, method: str) -> None:
     """Play *path* using the configured playback method."""
@@ -130,7 +121,6 @@ def _preview_voice(voice_name: str, prefs: dict) -> None:
             os.unlink(tmp_path)
 
 
-# ── Interactive selectors ─────────────────────────────────────────────────────
 
 def select_model(prefs: dict) -> str:
     print("\nAvailable models:")
@@ -160,7 +150,6 @@ def select_voice(prefs: dict) -> str:
         print("\nAvailable voices:")
         for i, name in enumerate(VOICE_NAMES, 1):
             code   = VOICE_REGISTRY[name]
-            # Derive gender/accent from voice ID prefix
             prefix = code[:2]
             accent = "American" if prefix[0] == "a" else "British"
             gender = "female" if prefix[1] == "f" else "male"
@@ -262,7 +251,6 @@ def select_speed(prefs: dict) -> float:
         print(f"  Please enter a number (1–{len(SPEED_PRESETS)}).")
 
 
-# ── Subcommand implementations ────────────────────────────────────────────────
 
 def cmd_show(prefs: dict) -> None:
     model    = prefs.get("model",    DEFAULTS["model"])
@@ -365,7 +353,6 @@ def cmd_delete(prefs: dict) -> None:
             print("  Cancelled.")
             return
 
-        # Delete the specific model file, not the entire cache directory
         from oto.speak import _model_path
         mp = _model_path(chosen)
         if mp.exists():
@@ -374,23 +361,19 @@ def cmd_delete(prefs: dict) -> None:
         return
 
 
-# ── Substitutions ────────────────────────────────────────────────────────────
 
 _SEED_SUBSTITUTIONS = [
-    # ── Titles & honorifics ──────────────────────────────────────────────
     {"find": r"\bDr\.",   "replace": "Doctor",    "regex": True, "first_only": False, "comment": "title"},
     {"find": r"\bMr\.",   "replace": "Mister",    "regex": True, "first_only": False, "comment": "title"},
     {"find": r"\bMrs\.",  "replace": "Missus",    "regex": True, "first_only": False, "comment": "title"},
     {"find": r"\bMs\.",   "replace": "Miz",       "regex": True, "first_only": False, "comment": "title"},
     {"find": r"\bProf\.", "replace": "Professor", "regex": True, "first_only": False, "comment": "title"},
-    # ── Common written shorthand ─────────────────────────────────────────
     {"find": "vs.",       "replace": "versus",         "regex": False, "first_only": False},
     {"find": "approx.",   "replace": "approximately",  "regex": False, "first_only": False},
     {"find": "dept.",     "replace": "department",     "regex": False, "first_only": False},
     {"find": "govt.",     "replace": "government",     "regex": False, "first_only": False},
     {"find": "w/o",       "replace": "without",        "regex": False, "first_only": False, "comment": "must precede w/"},
     {"find": r"(?<!\w)w/(?!\w)", "replace": "with",    "regex": True,  "first_only": False},
-    # ── Letter-acronyms TTS often mispronounces as words ─────────────────
     {"find": r"\bCEO\b",  "replace": "C.E.O.",  "regex": True, "first_only": False, "comment": "spell out"},
     {"find": r"\bCFO\b",  "replace": "C.F.O.",  "regex": True, "first_only": False, "comment": "spell out"},
     {"find": r"\bCTO\b",  "replace": "C.T.O.",  "regex": True, "first_only": False, "comment": "spell out"},
@@ -509,7 +492,6 @@ def _prompt_sub_entry(existing: dict | None = None) -> dict | None:
     is_edit = existing is not None
     defaults = existing or {}
 
-    # find
     prompt = f"  find [{defaults.get('find', '')}]: " if is_edit else "  find: "
     find = input(prompt).strip()
     if is_edit and not find:
@@ -518,13 +500,11 @@ def _prompt_sub_entry(existing: dict | None = None) -> dict | None:
         print("  Cancelled (empty find).")
         return None
 
-    # replace
     prompt = f"  replace [{defaults.get('replace', '')}]: " if is_edit else "  replace: "
     replace = input(prompt)
     if is_edit and replace == "":
         replace = defaults.get("replace", "")
 
-    # regex flag
     cur_regex = defaults.get("regex", False)
     default_label = "Y/n" if cur_regex else "y/N"
     raw = input(f"  regex? [{default_label}]: ").strip().lower()
@@ -535,7 +515,6 @@ def _prompt_sub_entry(existing: dict | None = None) -> dict | None:
     else:
         is_regex = cur_regex
 
-    # Validate regex
     if is_regex:
         try:
             _re.compile(find)
@@ -543,7 +522,6 @@ def _prompt_sub_entry(existing: dict | None = None) -> dict | None:
             print(f"  Invalid regex: {exc}")
             return None
 
-    # first_only flag
     cur_first = defaults.get("first_only", False)
     default_label = "Y/n" if cur_first else "y/N"
     raw = input(f"  first occurrence only? [{default_label}]: ").strip().lower()
@@ -557,7 +535,6 @@ def _prompt_sub_entry(existing: dict | None = None) -> dict | None:
     return {"find": find, "replace": replace, "regex": is_regex, "first_only": first_only}
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
 
 def main(args: list[str] | None = None) -> None:
     """Run the config subcommand.

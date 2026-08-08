@@ -59,7 +59,6 @@ def _play_audio(path: Path, method: str) -> None:
         cmd = ["open", str(path)] if sys.platform == "darwin" else ["xdg-open", str(path)]
         subprocess.Popen(cmd)
         return
-    # terminal (blocking)
     cmd = ["afplay", str(path)] if sys.platform == "darwin" else ["aplay", str(path)]
     print("  \u25b6 Playing...", file=sys.stderr)
     try:
@@ -91,7 +90,6 @@ def _oto_stem(input_path: Path) -> Path:
     notes.oto.md    -> notes.oto   (already has .oto, strip the outer ext)
     """
     if input_path.suffixes[-2:] == [".oto", input_path.suffix]:
-        # e.g. notes.oto.md -> strip the last suffix
         return input_path.with_suffix("")
     return input_path.with_suffix(".oto")
 
@@ -116,13 +114,11 @@ def _validate_model(alias: str) -> str | None:
 def main() -> None:
     args = sys.argv[1:]
 
-    # ── config subcommand ─────────────────────────────────────────────────────
     if args and args[0] == "config":
         from oto import config
         config.main(args[1:])
         return
 
-    # ── option parsing ────────────────────────────────────────────────────────
     mode = "default"  # "default" | "intermediate" | "preprocessed" | "dry-run"
     voice_override: str | None = None
     model_override: str | None = None
@@ -192,7 +188,6 @@ def main() -> None:
         positional.append(a)
         i += 1
 
-    # ── mutual exclusivity checks ─────────────────────────────────────────────
     flags_present = set()
     for a in args:
         if a in ("-i", "--intermediate"):
@@ -214,7 +209,6 @@ def main() -> None:
         print("oto: --play and -i are mutually exclusive (no audio is produced with -i)", file=sys.stderr)
         sys.exit(1)
 
-    # ── validate overrides ────────────────────────────────────────────────────
     if voice_override is not None:
         canonical = _validate_voice(voice_override)
         if canonical is None:
@@ -241,18 +235,15 @@ def main() -> None:
             )
             sys.exit(1)
 
-    # ── no-arg synopsis ───────────────────────────────────────────────────────
     if not positional:
         print(_SYNOPSIS)
         return
 
-    # ── resolve speed and playback from prefs (with CLI overrides) ────────────
     from oto.config import load_prefs, DEFAULTS
     _prefs = load_prefs()
     speed: float = speed_override if speed_override is not None else _prefs.get("speed", DEFAULTS["speed"])
     playback_method: str = _prefs.get("playback", DEFAULTS["playback"])
 
-    # ── process files ─────────────────────────────────────────────────────────
     multi = len(positional) > 1
     had_error = False
 
@@ -290,7 +281,6 @@ def main() -> None:
         sys.exit(1)
 
 
-# ── Mode implementations ────────────────────────────────────────────────────
 
 def _do_dry_run(
     input_path: Path,
@@ -317,10 +307,8 @@ def _do_dry_run(
     if multi:
         print(f"--- {input_path.name} ---", file=sys.stderr)
 
-    # Print preprocessed text to stdout
     print(text, end="")
 
-    # Estimate duration to stderr (only if tty)
     if sys.stderr.isatty():
         from oto.config import load_prefs, DEFAULTS
         prefs = load_prefs()
@@ -391,7 +379,6 @@ def _do_default(
         tmp_path = tmp.name
 
     try:
-        # Stage 0: Preprocessing — estimate scales with file size
         file_bytes = input_path.stat().st_size
         est_preprocess = max(0.2, file_bytes / 60_000)
         speak._run_stage(

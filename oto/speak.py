@@ -14,7 +14,6 @@ from urllib.request import urlretrieve
 
 from oto.config import DEFAULTS
 
-# kokoro-onnx release assets (v1.0)
 _KOKORO_RELEASE = "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
 MODEL_REGISTRY = {
     "int8":  {"file": "kokoro-v1.0.int8.onnx",  "desc": "Compact (88 MB)",   "size_mb": 88},
@@ -29,7 +28,6 @@ LOG_FILE   = Path.home() / ".local" / "share" / "oto" / "synthesis.jsonl"
 
 _MIN_SAMPLES_FOR_ESTIMATE = 3
 
-# Kokoro's native speed range — outside this, fall back to WSOLA.
 _KOKORO_MIN_SPEED = 0.5
 _KOKORO_MAX_SPEED = 2.0
 
@@ -43,7 +41,6 @@ def _load_prefs() -> dict:
     return dict(DEFAULTS)
 
 
-# ── Model file management ──────────────────────────────────────────────────
 
 def _model_path(model_alias: str) -> Path:
     """Return the path to the ONNX model file for *model_alias*."""
@@ -113,7 +110,6 @@ def ensure_model(model_alias: str) -> tuple[Path, Path]:
     return mp, vp
 
 
-# ── Phoneme counting ────────────────────────────────────────────────────────
 
 def _count_phonemes(text: str) -> int:
     """Count phonemes using the espeak backend."""
@@ -125,7 +121,6 @@ def _count_phonemes(text: str) -> int:
     return sum(len(p.replace(" ", "")) for p in phonemes)
 
 
-# ── Synthesis log ────────────────────────────────────────────────────────────
 
 def _load_log() -> list[dict]:
     if not LOG_FILE.exists():
@@ -193,7 +188,6 @@ def _estimate_speed_seconds(audio_samples: int) -> float | None:
     return max(a * audio_samples + b, 0.1)
 
 
-# ── Progress display ─────────────────────────────────────────────────────────
 
 def _progress_bar(elapsed: float, total_est: float, label: str = "", width: int = 20) -> str:
     frac = min(elapsed / total_est, 1.0) if total_est > 0 else 0
@@ -257,7 +251,6 @@ def _run_stage(label: str, est: float | None, fn, *args):
     return (result[0] if result else None), elapsed
 
 
-# ── Speed adjustment ─────────────────────────────────────────────────────────
 
 def adjust_speed(samples, speed: float):
     """Time-stretch audio using WSOLA (Waveform Similarity Overlap-Add).
@@ -296,8 +289,6 @@ def adjust_speed(samples, speed: float):
         if i == 0:
             best = 0
         else:
-            # Base expected position on frame index (not accumulated offset)
-            # to prevent drift from compounding across frames.
             expected = i * hop_a
             lo = max(0, expected - tolerance)
             hi = min(len(samples) - frame_size, expected + tolerance)
@@ -305,9 +296,6 @@ def adjust_speed(samples, speed: float):
                 break
 
             if overlap > 0 and prev_frame is not None:
-                # Correlate tail of previous input frame against the start
-                # of each candidate — this is the region that will overlap
-                # in the output, so phase-aligning here removes artefacts.
                 ref = prev_frame[-overlap:]
                 best_corr = -np.inf
                 best = expected
@@ -338,7 +326,6 @@ def adjust_speed(samples, speed: float):
     return output[:target_len]
 
 
-# ── Public API ───────────────────────────────────────────────────────────────
 
 def synthesize(
     text: str,
@@ -360,31 +347,23 @@ def synthesize(
     model_alias = model if model is not None else prefs.get("model", DEFAULTS["model"])
     voice_id    = voice if voice is not None else prefs.get("voice", DEFAULTS["voice"])
 
-    # Resolve friendly voice name → Kokoro voice ID if needed
     from oto.config import VOICE_REGISTRY
     if voice_id in VOICE_REGISTRY:
         voice_id = VOICE_REGISTRY[voice_id]
 
-    # Ensure model files are present (download if needed)
     mp, vp = ensure_model(model_alias)
 
-    # Defer heavy imports
     import soundfile as sf
     from kokoro_onnx import Kokoro
 
-    # Stage 1: Phonemize — estimate scales with text length
     est_phonemize = max(2.0, len(text) / 2_000) if len(text) > 200 else None
     phonemes, _ = _run_stage("Phonemizing", est_phonemize, _count_phonemes, text)
 
-    # Stage 2: Load model
     tts, _ = _run_stage(
         f"Loading model ({model_alias})", None,
         lambda: Kokoro(str(mp), str(vp)),
     )
 
-    # Stage 3: Synthesize
-    # Kokoro handles speed natively for 0.5–2.0; for >2.0, synthesize at 2.0
-    # then WSOLA the remainder.
     kokoro_speed = min(speed, _KOKORO_MAX_SPEED)
     wsola_factor = speed / kokoro_speed if speed > _KOKORO_MAX_SPEED else None
 
@@ -394,7 +373,6 @@ def synthesize(
         lambda: tts.create(text, voice=voice_id, speed=kokoro_speed, lang="en-us"),
     )
 
-    # Stage 4: WSOLA post-stretch (only for speeds > 2.0)
     speed_samples: int | None = None
     elapsed_speed: float | None = None
     if wsola_factor is not None and wsola_factor != 1.0:

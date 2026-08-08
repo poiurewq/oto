@@ -39,7 +39,6 @@ import sys
 import os
 from pathlib import Path
 
-# ── Number → words (used by expand_ranges) ────────────────────────────────────
 
 _N_ONES = [
     '', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
@@ -64,7 +63,6 @@ def _number_to_words(n: int) -> str:
         hundreds, rest = divmod(n, 100)
         tail = (' ' + _number_to_words(rest)) if rest else ''
         return _N_ONES[hundreds] + ' hundred' + tail
-    # 1000–9999: years like 1990 read as "nineteen ninety", others as "N thousand M"
     if 1000 <= n <= 9999:
         if n % 1000 == 0:
             return _number_to_words(n // 1000) + ' thousand'
@@ -77,7 +75,6 @@ def _number_to_words(n: int) -> str:
     return _number_to_words(thousands) + ' thousand' + tail
 
 
-# DT. Date/time patterns — must be matched before range expansion.
 _MONTHS = [
     '', 'January', 'February', 'March', 'April', 'May', 'June',
     'July', 'August', 'September', 'October', 'November', 'December',
@@ -102,7 +99,6 @@ def _time_to_words(h: int, m: int) -> str:
     return f'{display_h}:{m:02d} {period}'
 
 
-# YYYY-MM-DD or YYYY.MM.DD, optional separator + HH:MM
 _RE_DATETIME = re.compile(
     r'(?<!\w)'
     r'(\d{4})[.\-](\d{1,2})[.\-](\d{1,2})'   # date: YYYY-MM-DD or YYYY.MM.DD
@@ -128,10 +124,8 @@ def _expand_datetimes(line: str) -> str:
     return _RE_DATETIME.sub(_repl, line)
 
 
-# RG. Numeric range pattern: digits-digits not surrounded by other word chars.
 _RE_RANGE = re.compile(r'(?<!\w)(\d+)-(\d+)(?!\w)')
 
-# ── Configuration ──────────────────────────────────────────────────────────────
 
 SUBSTITUTIONS_FILE = Path.home() / ".config" / "oto" / "substitutions.json"
 
@@ -202,24 +196,20 @@ def _apply_substitutions(line: str, subs: list[dict], seen: set) -> str:
                 line = line.replace(sub["find"], sub["replace"])
     return line
 
-# 1. Abbreviation patterns (order matters: longer/more-specific first).
 ABBREVIATIONS: list[tuple] = [
     (re.compile(r'\be\.g\.,\s*'),                'for example, '),
     (re.compile(r'\be\.g\.'),                    'for example'),
     (re.compile(r'\bi\.e\.,\s*'),                'that is, '),
     (re.compile(r'\bi\.e\.'),                    'that is'),
-    # "ex." used as abbreviation for "example" (not preceded by a letter)
     (re.compile(r'(?<![A-Za-z])ex\.\s+'),        'for example '),
     (re.compile(r'(?<![A-Za-z])ex\.(?=[,);])'),  'for example'),
     (re.compile(r'\betc\.'),                     'and so on'),
 ]
 
-# IC. Introductory conjunctions/prepositions that begin subordinate clauses.
 _INTRO_RE = re.compile(
     r'^(If|When|Before|After|Because|Although|While|During|Since|Once)\s',
     re.IGNORECASE,
 )
-# Main-clause subjects we look for to place the comma before.
 _SUBJECT_RE = re.compile(
     r'(?<=\s)(they|he|she|it|we'
     r'|counselors?|supervisors?|students?|trainees?|educators?|clients?'
@@ -227,25 +217,20 @@ _SUBJECT_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Spoken ordinals for numbered list items (supports up to 20).
 _ORDINALS = [
     'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
     'nine', 'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen',
     'sixteen', 'seventeen', 'eighteen', 'nineteen', 'twenty',
 ]
 
-# Label lines that introduce a numbered sub-list.
 _LABEL_RE = re.compile(
     r'^(Potential Problems|Recommendations and Resolutions)\s*:',
     re.IGNORECASE,
 )
 
-# Characters that already signal a sentence boundary to a TTS engine.
-# ':' is included so label lines ("Potential Problems:") are left alone.
 _TERMINAL = frozenset('.?!:')
 
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _ordinal(n: int) -> str:
     return _ORDINALS[n - 1] if 1 <= n <= len(_ORDINALS) else str(n)
@@ -260,7 +245,6 @@ def _needs_period(line: str) -> bool:
     return s[-1] not in _TERMINAL
 
 
-# ── Transformation functions ───────────────────────────────────────────────────
 
 def _deduplicate(lines: list[str]) -> list[str]:
     """5. Drop any section whose heading (# or ##) has already appeared."""
@@ -362,7 +346,6 @@ def _add_intro_commas(line: str) -> str:
     return line
 
 
-# BC. Coordinating conjunctions that benefit from a preceding comma pause.
 _CONJ_PAT = re.compile(r'(?<![,;])\s+\b(and|but|or|so|yet)\b', re.IGNORECASE)
 
 
@@ -376,7 +359,6 @@ def _add_breathing_commas(line: str) -> str:
     s = line.rstrip('\n')
     if not s.strip() or len(s.split()) <= 20:
         return line
-    # Find the first eligible conjunction whose preceding clause is 10+ words.
     for m in _CONJ_PAT.finditer(s):
         words_before = len(s[:m.start()].split())
         if words_before >= 10:
@@ -402,7 +384,6 @@ def _wrap_in_quotes(line: str) -> str:
     return f'"{s}"\n'
 
 
-# ── Main processing loop ───────────────────────────────────────────────────────
 
 def process(input_path: str, output_path: 'str | None' = None) -> str:
     """Preprocess *input_path* and write the result to *output_path*.
